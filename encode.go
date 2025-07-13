@@ -12,8 +12,6 @@ func Encode[T any](value T) ([]byte, error) {
 
 // Decode deserializes bytes into a value of type T using msgpack decoding.
 // This is the standard decoding method used by plugz contracts.
-func Decode[T any](data []byte) (T, error) {
-	var value T
-	err := msgpack.Unmarshal(data, &value)
-	return value, err
+func Decode[T any](data []byte, value *T) error {
+	return msgpack.Unmarshal(data, value)
 }
