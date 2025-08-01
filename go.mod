@@ -1,15 +1,13 @@
-module plugz
+module github.com/zoobzio/flume
 
 go 1.23.1
 
 require (
-	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zoobzio/pipz v0.0.1
-	github.com/zoobzio/sctx v0.0.0
+	github.com/zoobzio/pipz v0.6.0
+	github.com/zoobzio/zlog v0.1.0
+	gopkg.in/yaml.v3 v3.0.1
 )
-
-require github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 
 replace github.com/zoobzio/pipz => ../pipz
 
-replace github.com/zoobzio/sctx => ../sctx
+replace github.com/zoobzio/zlog => ../zlog

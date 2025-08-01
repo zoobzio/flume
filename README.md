@@ -1,873 +1,303 @@
-# plugz
+# Flume
 
-Build type-safe processing pipelines in Go that you can retrieve from anywhere in your codebase using just the types.
+A dynamic pipeline factory for [pipz](https://github.com/zoobzio/pipz) that enables schema-driven pipeline construction with hot-reloading capabilities.
 
-With plugz, you create a processing pipeline once and access it from any package without passing references around. Your pipelines are discoverable through Go's type system - if you know the types, you can find the pipeline.
+## Overview
 
-```go
-// Register a pipeline in one place...
-const securityKey SecurityKey = "v1"
-contract := plugz.GetContract[User](securityKey)
-contract.Register(
-    plugz.Apply(validateUser),
-    plugz.Apply(sanitizeInput),
-    plugz.Apply(auditAccess),
-)
-
-// ...retrieve and use it anywhere else
-const securityKey SecurityKey = "v1"
-contract := plugz.GetContract[User](securityKey)
-user, err := contract.Process(userData)
-```
-
-No singletons to inject. No interfaces to implement. Just types.
-
-## Why plugz?
-
-### The Problem: Scattered Business Logic
-
-Every codebase eventually looks like this:
-
-```go
-// Middleware hell - repeated in every handler
-func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
-    // Auth check scattered everywhere
-    token := r.Header.Get("Authorization")
-    if token == "" {
-        http.Error(w, "Unauthorized", 401)
-        return
-    }
-    
-    // Rate limiting logic duplicated
-    user := getUserFromToken(token)
-    if isRateLimited(user) {
-        http.Error(w, "Rate limited", 429)
-        return
-    }
-    
-    // Logging scattered across handlers
-    log.Printf("API Request: %s %s", r.Method, r.URL.Path)
-    
-    // Finally... actual business logic
-    processRequest(w, r)
-}
-// Copy-pasted everywhere with slight variations 😢
-```
-
-### The Solution: Pipeline-Driven Architecture
-
-```go
-// Register once at startup
-const apiMiddleware MiddlewareKey = "api-v1"
-contract := plugz.GetContract[Request](apiMiddleware)
-contract.Register(
-    plugz.Apply(authenticate),  // Check auth token
-    plugz.Apply(rateLimit),     // Apply rate limits
-    plugz.Effect(logRequest),   // Log the request
-)
-
-// Use everywhere - one clean line
-func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
-    request, err := contract.Process(buildRequest(r))
-    if err != nil {
-        http.Error(w, err.Error(), getStatusCode(err))
-        return
-    }
-    // Clean business logic with authenticated, rate-limited request
-    processRequest(w, request)
-}
-```
-
-**Result**: No more scattered conditionals. No more copy-paste middleware. Just clean, reusable, type-safe pipelines.
-
-### But Wait, There's More: Error Handling
-
-What happens when your clean middleware fails? Traditional code scatters error handling logic everywhere too:
-
-```go
-// Error handling hell - repeated everywhere
-func chargeCard(p Payment) (Payment, error) {
-    err := processCharge(p)
-    if err != nil {
-        // Scattered error logic in every function
-        if strings.Contains(err.Error(), "insufficient funds") {
-            sendEmail(p.CustomerEmail, "Payment declined")
-            logToAudit("insufficient_funds", p)
-            return p, err
-        }
-        if strings.Contains(err.Error(), "network") {
-            alertOpsTeam("payment_network_down")
-            tryBackupProvider(p)
-            return p, err
-        }
-        // More scattered error handling...
-    }
-    return p, nil
-}
-```
-
-**With plugz**: Error handling becomes just another pipeline!
-
-```go
-// Error handling pipeline - completely separate from payment logic
-const errorKey PaymentErrorKey = "v1"
-errorContract := plugz.GetContract[PaymentError](errorKey)
-errorContract.Register(
-    plugz.Apply(categorizeError),     // Determine error type
-    plugz.Apply(notifyCustomer),      // Send appropriate notifications  
-    plugz.Apply(attemptRecovery),     // Try backup strategies
-    plugz.Effect(alertOpsTeam),       // Alert operations if needed
-    plugz.Effect(auditLog),           // Compliance logging
-)
-
-// Inside your payment processor - NO IMPORTS of error handling needed!
-func chargeCard(p Payment) (Payment, error) {
-    err := processCharge(p)
-    if err != nil {
-        // Discover error pipeline using just types
-        errorContract := plugz.GetContract[PaymentError](errorKey)
-        result, _ := errorContract.Process(PaymentError{
-            Payment: p,
-            OriginalError: err,
-        })
-        return p, result.FinalError  // Might be nil if recovered!
-    }
-    return p, nil
-}
-```
-
-**The breakthrough**: Your payment processor has **zero imports** of error handling code. Different teams can own different pipelines. Error handling logic is completely separated from business logic.
-
-### This Pattern Scales to Everything
-
-Once you see it, you can't unsee it. **Every scattered conditional in your codebase is a pipeline waiting to happen:**
-
-```go
-// A/B testing? Pipeline.
-const testKey ExperimentKey = "checkout-flow-v2"
-experiment := plugz.GetContract[User](testKey)
-
-// Data validation? Pipeline.  
-const validationKey ValidationKey = "user-onboarding"
-validator := plugz.GetContract[SignupForm](validationKey)
-
-// Multi-tenant logic? Different pipelines per tenant.
-const tenantKey TenantKey = "enterprise-customer-123"
-processor := plugz.GetContract[Order](tenantKey)
-
-// Testing? Just another universe.
-const testKey PaymentKey = "test"
-testContract := plugz.GetContract[Payment](testKey)
-testContract.Register(
-    plugz.Apply(validatePayment),    // Real validation
-    plugz.Apply(checkFraud),         // Real business logic
-    plugz.Apply(mockChargeCard),     // Mock external API
-)
-// No mocking frameworks needed!
-```
-
-> 💡 **See [USE_CASES.md](USE_CASES.md) for complete examples including multi-tenant systems, A/B testing, data validation pipelines, testing patterns, and more.**
+Flume allows you to:
+- Define pipelines using YAML/JSON schemas instead of code
+- Register reusable processors, predicates, and conditions
+- Dynamically update pipeline behavior without restarts
+- Build any conceivable pipeline from registered building blocks
 
 ## Installation
 
 ```bash
-go get github.com/zoobzio/plugz
+go get github.com/zoobzio/flume
 ```
 
-## Quick Start
+## Requirements
 
-### 5-Minute Guide to plugz
-
-1. **Define your types** - A key type for discovery and a data type to process:
+Your data type `T` must implement `pipz.Cloner[T]` to support parallel processing:
 
 ```go
-type ValidationKey string    // Key type identifies the pipeline
-type User struct {          // Data type to process
-    Name  string
-    Email string
-    Age   int
-}
-```
-
-2. **Write processor functions** - Just normal Go functions! No special interfaces or plugz imports needed:
-
-```go
-// Validation functions: check data, return error if invalid
-func checkEmail(u User) error {
-    if !strings.Contains(u.Email, "@") {
-        return fmt.Errorf("invalid email: %s", u.Email)
-    }
-    return nil
+type MyData struct {
+    Value string
 }
 
-// Transform functions: always modify and return new data
-func normalizeEmail(u User) User {
-    u.Email = strings.ToLower(u.Email)
-    return u
-}
-
-// Business logic functions: pure logic, no plugz knowledge
-func applyDiscount(u User) User {
-    u.Discount = 0.10  // 10% off
-    return u
-}
-
-func isVIP(u User) bool {
-    return u.TotalPurchases > 1000
+func (d MyData) Clone() MyData {
+    return MyData{Value: d.Value}
 }
 ```
 
-**Key insight**: These are just regular Go functions that work with your domain types. They don't import plugz, don't know about pipelines, and can be unit tested independently!
-
-3. **Wrap with adapters and register** - Adapters tell plugz how to use your functions:
+## Basic Usage
 
 ```go
-const validationKey ValidationKey = "v1"
-contract := plugz.GetContract[User](validationKey)
-contract.Register(
-    plugz.Validate(checkEmail),               // Check without modifying
-    plugz.Transform(normalizeEmail),          // Always modify
-    plugz.Mutate(applyDiscount, isVIP),      // Conditionally modify
-    plugz.Effect(func(u User) error {         // Side effects
-        log.Printf("Processed user: %s", u.Email)
-        return nil
-    }),
+// Create a factory for your data type
+factory := flume.New[MyData]()
+
+// Add processors
+factory.Add(
+    pipz.Apply("validate", validateFunc),
+    pipz.Transform("normalize", normalizeFunc),
+    pipz.Effect("log", logFunc),
+)
+
+// Define pipeline structure in YAML
+schema := `
+version: "1.0.0"  # Optional version tracking
+type: sequence
+children:
+  - ref: validate
+  - ref: normalize
+  - ref: log
+`
+
+// Build the pipeline
+pipeline, err := factory.BuildFromYAML(schema)
+
+// Use it
+result, err := pipeline.Process(ctx, data)
+```
+
+## Schema Format
+
+### Schema Version
+All schemas support optional version tracking:
+```yaml
+version: "1.0.0"  # Semantic versioning recommended
+ref: processor-name
+```
+
+### Simple Processor Reference
+```yaml
+ref: processor-name
+```
+
+### Sequence (Sequential Processing)
+```yaml
+type: sequence
+children:
+  - ref: step1
+  - ref: step2
+  - ref: step3
+```
+
+### Conditional Processing (Filter)
+```yaml
+type: filter
+predicate: is-premium  # Reference to registered predicate
+then:
+  ref: premium-handler
+```
+
+### Multi-way Routing (Switch)
+```yaml
+type: switch
+condition: get-status  # Reference to registered condition
+routes:
+  pending:
+    ref: handle-pending
+  approved:
+    ref: handle-approved
+default:
+  ref: handle-unknown
+```
+
+### Error Handling
+```yaml
+# Retry
+type: retry
+config:
+  attempts: 3
+child:
+  ref: flaky-operation
+
+# Fallback
+type: fallback
+children:
+  - ref: primary-handler
+  - ref: backup-handler
+
+# Timeout
+type: timeout
+config:
+  duration: "30s"
+child:
+  ref: slow-operation
+```
+
+## Registration API
+
+### Processors
+Processors are the building blocks - any `pipz.Chainable[T]`:
+
+```go
+// Add processors - they name themselves
+factory.Add(
+    pipz.Apply("validate", validateOrder),
+    pipz.Transform("normalize", normalizeOrder),
+    pipz.Effect("notify", sendNotification),
 )
 ```
 
-**What just happened?**
-- `plugz.Validate(checkEmail)` wraps your `func(User) error` 
-- `plugz.Transform(normalizeEmail)` wraps your `func(User) User`
-- `plugz.Mutate(applyDiscount, isVIP)` wraps your transform + condition functions
-- `plugz.Effect(...)` wraps functions that do side effects
-
-**Behind the scenes**: plugz handles all serialization. Your functions work with concrete types, not bytes!
-
-4. **Use it anywhere** - No imports needed, just the types:
+### Predicates (for Filter)
+Boolean functions for conditional processing:
 
 ```go
-// In a completely different package...
-const validationKey ValidationKey = "v1"
-contract := plugz.GetContract[User](validationKey)
-user, err := contract.Process(User{
-    Name:  "john doe",
-    Email: "JOHN@EXAMPLE.COM",
-    Age:   25,
+factory.AddPredicate(flume.Predicate[Order]{
+    Name: "is-premium",
+    Predicate: func(ctx context.Context, o Order) bool {
+        return o.Customer.Tier == "premium"
+    },
 })
-// Result: {Name:"John Doe" Email:"john@example.com" Age:25}
 ```
 
-That's it! The pipeline is globally discoverable through the type system.
-
-### The Magic: Type-Based Discovery
+### Conditions (for Switch)
+String-returning functions for multi-way routing:
 
 ```go
-// team_a/auth.go
-type AuthKey string
-const authKey AuthKey = "v1"
-contract := plugz.GetContract[User](authKey)
-contract.Register(
-    plugz.Apply(checkPassword),
-    plugz.Apply(checkMFA),
-    plugz.Apply(auditLogin),
+factory.AddCondition(flume.Condition[Order]{
+    Name: "order-status",
+    Condition: func(ctx context.Context, o Order) string {
+        return o.Status // "pending", "approved", "rejected", etc.
+    },
+})
+```
+
+## Dynamic Schemas
+
+Register schemas that can be updated at runtime:
+
+```go
+// Set a named schema (adds or updates)
+factory.SetSchema("order-pipeline", schema)
+
+// Use the pipeline - always gets current version
+pipeline, ok := factory.Pipeline("order-pipeline")
+if !ok {
+    // Handle missing schema
+}
+result, err := pipeline.Process(ctx, order)
+
+// Update the schema - running pipelines continue unaffected
+factory.SetSchema("order-pipeline", newSchema)
+
+// Next call uses the updated pipeline automatically
+pipeline, _ = factory.Pipeline("order-pipeline")
+```
+
+## Complex Example
+
+```go
+factory := flume.New[Order]()
+
+// Add processors
+factory.Add(
+    pipz.Apply("validate", validateOrder),
+    pipz.Apply("check-inventory", checkInventory),
+    pipz.Apply("charge-payment", chargePayment),
+    pipz.Effect("send-confirmation", sendEmail),
+    pipz.Apply("premium-discount", applyDiscount),
 )
 
-// team_b/api.go - No import of team_a needed!
-type AuthKey string  // Same type name
-const authKey AuthKey = "v1"
-contract := plugz.GetContract[User](authKey)
-user, _ := contract.Process(loginRequest)  // Same pipeline!
-```
-
-If you know the types, you have the pipeline. No dependency injection, no singletons, no configuration.
-
-## Philosophy: Types Instead of Logic
-
-plugz represents a fundamental shift in how we organize code:
-
-- **Traditional**: Business logic scattered in if/else statements
-- **plugz**: Business logic encoded in the type system
-
-```go
-// ❌ Traditional: Runtime conditionals everywhere
-if customer.Type == "premium" {
-    processPremiumOrder(order)
-} else if customer.Type == "standard" {
-    processStandardOrder(order)
-}
-
-// ✅ plugz: Behavior determined by types
-const premiumKey PremiumKey = "v1"
-const standardKey StandardKey = "v1"
-premiumContract := plugz.GetContract[Order](premiumKey)
-standardContract := plugz.GetContract[Order](standardKey)
-```
-
-**The deeper insight**: Most if/else statements in business logic are just routing decisions. With plugz, the type system becomes your router. No more switch statements checking user roles, customer tiers, regions, or versions - just pass the right type and get the right behavior.
-
-### Key Principles
-
-1. **Isolation MEANS Isolation**: Different type universes cannot see or affect each other. Period.
-2. **Types Are Configuration**: No YAML, no JSON, no environment variables. Just Go types.
-3. **Zero Magic**: Everything is explicit. Want observability? Add it yourself:
-   ```go
-   func RegisterPaymentPipeline() {
-       const paymentKey PaymentKey = "v1"
-       contract := plugz.GetContract[Payment](paymentKey)
-       contract.Register(
-           plugz.Apply(validate),
-           plugz.Apply(charge),
-           plugz.Apply(notify),
-       )
-
-       // Your app's concern, not plugz's
-       logger.Info("Payment pipeline v1 registered")
-   }
-   ```
-4. **Ephemeral by Design**: plugz doesn't manage lifecycle. It's a pattern, not a framework.
-
-## See It In Action
-
-Want to see plugz in action before diving into code? Run the interactive demos:
-
-```bash
-go run ./demo all         # Run all demos
-go run ./demo security    # Security audit pipeline
-go run ./demo transform   # Data transformation
-go run ./demo universes   # Multi-tenant isolation
-go run ./demo validation  # Data validation
-go run ./demo workflow    # Multi-stage workflows
-go run ./demo middleware  # Request middleware
-go run ./demo errors      # Error handling pipelines
-go run ./demo versioning  # Pipeline versioning & A/B/C testing
-go run ./demo testing     # Testing without mocks
-
-# For a more engaging experience with typewriter effects:
-go run ./demo all --interactive
-```
-
-## Complete Example
-
-```go
-package main
-
-import (
-    "fmt"
-    "strings"
-    "github.com/zoobzio/plugz"
+// Add predicates
+factory.AddPredicate(
+    flume.Predicate[Order]{Name: "is-premium", Predicate: isPremiumCustomer},
+    flume.Predicate[Order]{Name: "high-value", Predicate: isHighValueOrder},
 )
 
-// Define a contract key type
-type UserProcessorKey string
-
-// Define your data type
-type User struct {
-    Name  string
-    Email string
-    Age   int
-}
-
-func main() {
-    // Get a contract
-    const userProcessorKey UserProcessorKey = "v1"
-    contract := plugz.GetContract[User](userProcessorKey)
-
-    // Register processors
-    contract.Register(
-        plugz.Apply(normalizeEmail),
-        plugz.Apply(validateAge),
-        plugz.Apply(formatName),
-    )
-
-    // Process data
-    user := User{Name: "john doe", Email: "JOHN@EXAMPLE.COM", Age: 25}
-    result, err := contract.Process(user)
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Printf("%+v\n", result)
-    // Output: {Name:John Doe Email:john@example.com Age:25}
-}
-
-func normalizeEmail(u User) (User, error) {
-    u.Email = strings.ToLower(u.Email)
-    return u, nil
-}
-
-func validateAge(u User) (User, error) {
-    if u.Age < 0 || u.Age > 150 {
-        return u, fmt.Errorf("invalid age: %d", u.Age)
-    }
-    return u, nil
-}
-
-func formatName(u User) (User, error) {
-    // Title case each word in the name
-    words := strings.Fields(strings.ToLower(u.Name))
-    for i, word := range words {
-        if len(word) > 0 {
-            words[i] = strings.ToUpper(word[:1]) + word[1:]
-        }
-    }
-    u.Name = strings.Join(words, " ")
-    return u, nil
-}
-```
-
-## API Reference
-
-### Core Types
-
-| Type                            | Description                                                  |
-| ------------------------------- | ------------------------------------------------------------ |
-| `Processor[T any]`              | Function type that transforms `T` to `T` with possible error |
-| `Contract[K comparable, T any]` | Type-safe pipeline bound to key type `K` and data type `T`   |
-| `Chainable[T any]`              | Interface for components that can process type `T`           |
-| `Chain[T any]`                  | Sequential executor for multiple `Chainable[T]` components   |
-| `ByteProcessor`                 | Low-level function type for byte transformations             |
-
-### Contract Methods
-
-| Method                                 | Description                                     |
-| -------------------------------------- | ----------------------------------------------- |
-| `GetContract[T](key K)`                | Gets or creates a contract with given key       |
-| `Register(processors ...Processor[T])` | Registers processors to the contract's pipeline |
-| `Process(value T) (T, error)`          | Executes the pipeline on input value            |
-| `Link() Chainable[T]`                  | Returns contract as chainable for composition   |
-| `String() string`                      | Returns string representation of contract       |
-
-### Chain Methods
-
-| Method                            | Description                                   |
-| --------------------------------- | --------------------------------------------- |
-| `NewChain[T]()`                   | Creates a new empty chain                     |
-| `Add(processors ...Chainable[T])` | Adds chainable processors to the chain        |
-| `Process(value T) (T, error)`     | Executes all processors sequentially in order |
-
-### Utility Functions
-
-| Function                                       | Description                                   |
-| ---------------------------------------------- | --------------------------------------------- |
-| `Signature[T any](key K) string`               | Returns unique signature for contract K:key:T |
-
-## Concepts
-
-### Contracts
-
-Contracts provide type-safe access to processing pipelines. They are identified by two generic parameters:
-
-- `K`: A comparable type serving as the contract's domain identifier
-- `T`: The data type being processed
-
-The combination of `K`, its value, and `T` creates a globally unique pipeline identifier.
-
-### Type-Based Discovery
-
-By using concrete types as keys, contracts become discoverable through type information alone:
-
-```go
-type AuthKey string
-type ValidationKey string
-
-// Different contracts for different purposes
-const authKey AuthKey = "v1"
-const validationKey ValidationKey = "v1"
-authContract := plugz.GetContract[User](authKey)
-validationContract := plugz.GetContract[User](validationKey)
-
-// Anyone with AuthKey and User types can retrieve the same pipeline
-const authKey AuthKey = "v1"
-contract := plugz.GetContract[User](authKey)
-```
-
-### Type Universes
-
-**Type Universes are the killer feature of plugz.** They let you create completely isolated processing pipelines for different contexts using the same data types.
-
-#### The Concept
-
-The KEY TYPE determines which pipeline you get. Even if two pipelines use the same key value and process the same data type, different key types create different universes:
-
-```go
-type StandardKey string
-type PremiumKey string
-
-// Same key value "v1", same data type Transaction
-// But COMPLETELY DIFFERENT pipelines!
-const standardKey StandardKey = "v1"
-const premiumKey PremiumKey = "v1"
-standard := plugz.GetContract[Transaction](standardKey)
-premium := plugz.GetContract[Transaction](premiumKey)
-```
-
-#### Real-World Example: Multi-Tenant Payment Processing
-
-```go
-// Define separate key types for each merchant tier
-type StandardMerchantKey string
-type PremiumMerchantKey string
-type HighRiskMerchantKey string
-
-// All process the same Transaction type
-type Transaction struct {
-    ID       string
-    Amount   float64
-    Currency string
-    CardLast4 string
-}
-
-// Standard merchants: basic fraud checks
-const standardMerchantKey StandardMerchantKey = "v1"
-standardContract := plugz.GetContract[Transaction](standardMerchantKey)
-standardContract.Register(
-    plugz.Apply(validateAmount),      // Max $10,000
-    plugz.Apply(checkVelocity),      // 10 transactions/hour
-    plugz.Apply(notifyMerchant),
+// Add conditions
+factory.AddCondition(
+    flume.Condition[Order]{Name: "payment-type", Condition: getPaymentType},
 )
 
-// Premium merchants: relaxed limits, priority processing
-const premiumMerchantKey PremiumMerchantKey = "v1"
-premiumContract := plugz.GetContract[Transaction](premiumMerchantKey)
-premiumContract.Register(
-    plugz.Apply(validatePremiumAmount),  // Max $100,000
-    plugz.Apply(checkPremiumVelocity),  // 100 transactions/hour
-    plugz.Apply(prioritySettle),        // Same-day settlement
-    plugz.Apply(notifyPremium),         // SMS + Email alerts
-)
+// Complex schema with nested logic
+schema := `
+type: sequence
+name: order-processing
+children:
+  - ref: validate
+  
+  - type: filter
+    predicate: is-premium
+    then:
+      ref: premium-discount
+      
+  - type: parallel  # Requires Cloner[T]
+    children:
+      - ref: check-inventory
+      - type: filter
+          predicate: high-value
+          then:
+            ref: fraud-check
+            
+  - type: switch
+    condition: payment-type
+    routes:
+      credit:
+        type: retry
+        config: { attempts: 3 }
+        child:
+          ref: charge-payment
+      paypal:
+        ref: paypal-handler
+    default:
+      ref: manual-review
+      
+  - ref: send-confirmation
+`
 
-// High-risk merchants: enhanced security
-const highRiskMerchantKey HighRiskMerchantKey = "v1"
-highRiskContract := plugz.GetContract[Transaction](highRiskMerchantKey)
-highRiskContract.Register(
-    plugz.Apply(validate3DS),           // Require 3D Secure
-    plugz.Apply(checkBlocklist),        // Enhanced fraud database
-    plugz.Apply(manualReview),          // Flag for human review
-    plugz.Apply(holdFunds),            // 7-day settlement hold
-    plugz.Apply(auditLog),             // Regulatory compliance
-)
-
-// Usage: Generic function - the KEY TYPE determines the pipeline!
-func processPayment[K comparable](key K, txn Transaction) (Transaction, error) {
-    contract := plugz.GetContract[Transaction](key)
-    return contract.Process(txn)
-}
-
-// The caller chooses the universe by passing the right key type:
-const standardKey StandardMerchantKey = "v1"
-const premiumKey PremiumMerchantKey = "v1"
-const highRiskKey HighRiskMerchantKey = "v1"
-result, err := processPayment(standardKey, txn)  // Standard pipeline
-result, err := processPayment(premiumKey, txn)   // Premium pipeline
-result, err := processPayment(highRiskKey, txn)  // High-risk pipeline
-
-// Even cleaner - let the merchant's key type drive the behavior:
-func (m Merchant) ProcessTransaction(txn Transaction) (Transaction, error) {
-    // Merchant has a key field that determines their universe
-    return processPayment(m.Key, txn)
-}
+pipeline, err := factory.BuildFromYAML(schema)
 ```
 
-#### Why This Matters
+## Schema Validation
 
-1. **Complete Isolation**: A bug in the high-risk pipeline CANNOT affect standard merchants
-2. **Type Safety**: You cannot accidentally process a high-risk transaction through the standard pipeline
-3. **Independent Development**: Teams can work on different pipelines without coordination
-4. **A/B Testing**: Run experiments without feature flags
-5. **Multi-tenancy**: Each customer gets their own processing universe
-
-#### Common Use Cases for Type Universes
+Flume validates schemas before building, catching errors early with helpful messages:
 
 ```go
-// A/B Testing
-type StrategyAKey string
-type StrategyBKey string
+schema := `
+type: sequence
+children:
+  - ref: missing-processor
+  - type: filter
+    predicate: missing-predicate
+    then:
+      ref: another-missing
+`
 
-// Multi-region processing
-type USRegionKey string
-type EURegionKey string
-type APACRegionKey string
-
-// Environment separation
-type DevKey string
-type StagingKey string
-type ProductionKey string
-
-// API versioning
-type APIv1Key string
-type APIv2Key string
-type APIv3Key string
-
-// Customer tiers
-type FreeUserKey string
-type ProUserKey string
-type EnterpriseKey string
+err := factory.ValidateSchema(schema)
+// Returns: 3 validation errors:
+//   1. root.children[0]: processor 'missing-processor' not found
+//   2. root.children[1]: predicate 'missing-predicate' not found  
+//   3. root.children[1].then: processor 'another-missing' not found
 ```
 
-Each key type creates its own universe. The same code can behave completely differently based on which universe it's in.
-
-### Processing Model
-
-1. Processors are pure functions that transform data
-2. Each processor receives the output of the previous processor
-3. Processing stops on first error
-4. Original data is preserved if an error occurs
-
-### Composition
-
-Contracts can be composed into larger workflows using chains:
-
-```go
-chain := plugz.NewChain[User]()
-chain.Add(
-    validationContract.Link(),
-    enrichmentContract.Link(),
-    auditContract.Link(),
-)
-
-result, err := chain.Process(user)
-```
-
-## How It Works
-
-### The Architecture
-
-plugz uses several techniques to provide its type-safe, discoverable pipeline system:
-
-#### 1. Global Registry Pattern
-
-A singleton service initialized at package import manages all pipelines:
-
-- Pipelines are stored as chains of `ByteProcessor` functions
-- Thread-safe with read/write mutex protection
-- Allows pipeline discovery from anywhere in your codebase
-
-#### 2. Smart Serialization
-
-Contracts intelligently handle data serialization:
-
-- Serialization only happens when absolutely necessary
-- Direct memory passing when possible
-- Automatic optimization for common patterns
-- Zero overhead for most use cases
-
-#### 3. Smart Type Caching
-
-Type reflection happens only once per type:
-
-- First use: `reflect.TypeOf()` captures type information
-- Subsequent uses: Returns cached string instantly
-- Thread-safe double-checked locking for performance
-
-### Thread Safety
-
-All operations are thread-safe:
-
-- Multiple goroutines can register pipelines concurrently
-- Multiple goroutines can process data through pipelines concurrently
-- Type cache is protected with read/write mutexes
-
-### Important Behaviors
-
-- **Contract Registration**: Registering processors to an existing contract **appends** to the existing pipeline
-- **Error Handling**: If any processor fails, the chain stops and returns the original input value with the error
-- **Isolation**: Each contract's processors are completely isolated via gob copying
-
-## Performance
-
-plugz is designed for real-world performance. Here are the key characteristics:
-
-### Quick Performance Summary
-
-| Scenario | Throughput | Use Case |
-|----------|------------|----------|
-| Read-only validation | ~244k ops/sec | Input validation, auth checks |
-| Single transformation | ~138k ops/sec | Data normalization, enrichment |
-| Multi-step pipeline | ~73k ops/sec | Business rule chains |
-| Complex validation | ~15k ops/sec | Order processing, form validation |
-
-### Performance Features
-
-✅ **Minimal overhead**: ~200-500ns per operation  
-✅ **Smart caching**: Pipeline lookup is near-zero cost after first access  
-✅ **Read-only optimization**: Validation processors avoid serialization overhead  
-✅ **Predictable scaling**: Performance scales linearly with pipeline complexity  
-
-### When plugz is Fast
-
-- **Validation pipelines**: Read-only processors are highly optimized
-- **Small to medium data**: Serialization overhead is minimal
-- **Cached contracts**: Reusing contract references eliminates lookup costs
-
-### Real-World Impact
-
-**Web APIs**: 50-200μs additional latency per request (negligible)  
-**Batch processing**: 10k-100k records/sec depending on complexity  
-**Memory usage**: 2-5KB additional per operation
-
-> 📊 **See [benchmarks/README.md](benchmarks/README.md) for detailed performance analysis, optimization tips, and profiling guides.**
-
-## Best Practices
-
-### Use Constants for Contract Keys
-
-Instead of using string literals throughout your code, define constants:
-
-```go
-// Good
-const (
-    SecurityContractV1 = "v1"
-    SecurityContractV2 = "v2"
-)
-
-const securityKey SecurityKey = SecurityContractV1
-contract := plugz.GetContract[User](securityKey)
-
-// Avoid
-contract := plugz.GetContract[User](SecurityKey("v1"))
-```
-
-### Use Meaningful Key Types
-
-Your key types should describe the domain they represent:
-
-```go
-// Good - clearly indicates purpose
-type AuthenticationKey string
-type ValidationKey string
-type PersistenceKey string
-
-// Avoid - too generic
-type Key string
-type ProcessorKey string
-```
-
-### Embrace Type Proliferation
-
-Many key types is not a problem - it's the solution:
-
-```go
-// Each type represents different business logic
-type FreeUserKey string
-type PremiumUserKey string
-type EnterpriseUserKey string
-
-type USRegionKey string
-type EURegionKey string
-type APACRegionKey string
-
-type TestPaymentKey string
-type LivePaymentKey string
-```
-
-These types replace runtime conditionals with compile-time guarantees. You're moving business logic from if/else statements into the type system where it belongs.
-
-### Compose with Chains
-
-When combining multiple contracts, use a single `Add` call:
-
-```go
-// Good
-chain := plugz.NewChain[User]()
-chain.Add(
-    authContract.Link(),
-    validationContract.Link(),
-    auditContract.Link(),
-)
-
-// Avoid
-chain := plugz.NewChain[User]()
-chain.Add(authContract.Link())
-chain.Add(validationContract.Link())
-chain.Add(auditContract.Link())
-```
-
-### Keep Processors Pure
-
-Processors should be pure functions without side effects:
-
-```go
-// Good - pure function
-func validateAge(u User) (User, error) {
-    if u.Age < 0 || u.Age > 150 {
-        return u, fmt.Errorf("invalid age: %d", u.Age)
-    }
-    return u, nil
-}
-
-// Avoid - has side effects
-func validateAge(u User) (User, error) {
-    log.Printf("Validating user %s", u.Name) // Side effect!
-    if u.Age < 0 || u.Age > 150 {
-        return u, fmt.Errorf("invalid age: %d", u.Age)
-    }
-    return u, nil
-}
-```
-
-### Error Messages Should Be Descriptive
-
-Include context in your error messages:
-
-```go
-// Good
-return u, fmt.Errorf("age validation failed: %d is outside valid range (0-150)", u.Age)
-
-// Avoid
-return u, fmt.Errorf("invalid age")
-```
-
-## Common Questions
-
-### "What about the global state?"
-
-Isolation MEANS isolation. `TestKey("test-1")` and `TestKey("test-2")` create completely separate universes that cannot see each other. The global registry is an implementation detail - what matters is that universes are isolated.
-
-### "Won't I have too many key types?"
-
-That's the point! Each key type represents different business logic. Instead of runtime if/else statements, you encode behavior in types. Type proliferation is a feature, not a bug - it's compile-time business logic.
-
-### "How do I debug which processors are registered?"
-
-Add logging to your registration functions - plugz is ephemeral by design:
-
-```go
-func RegisterPaymentPipeline() {
-    const paymentKey PaymentKey = "v1"
-    contract := plugz.GetContract[Payment](paymentKey)
-    contract.Register(
-        plugz.Apply(validate),
-        plugz.Apply(charge),
-        plugz.Apply(notify),
-    )
-    log.Printf("Registered payment pipeline v1 with %d processors", 3)
-)
-```
-
-### "Is this just dependency injection?"
-
-No. DI containers use reflection, configuration, and runtime resolution. plugz uses types - if you know the types, you have the pipeline. No container, no interfaces, no magic.
-
-## Documentation
-
-- [ADAPTERS.md](ADAPTERS.md) - Complete guide to using and creating adapters
-- [USE_CASES.md](USE_CASES.md) - Detailed use cases with live demonstrations
-
-Run the interactive demos to see plugz in action:
-
-```bash
-go run ./demo all         # Run all demos
-go run ./demo security    # Security audit pipeline
-go run ./demo transform   # Data transformation
-go run ./demo universes   # Multi-tenant isolation
-go run ./demo validation  # Data validation
-go run ./demo workflow    # Multi-stage workflows
-go run ./demo middleware  # Request middleware
-go run ./demo errors      # Error handling pipelines
-go run ./demo versioning  # Pipeline versioning & A/B/C testing
-go run ./demo testing     # Testing without mocks
-```
+Validation checks:
+- All processor/predicate/condition references exist
+- Required fields are present (e.g., filter needs predicate + then)
+- Connector constraints (e.g., fallback needs exactly 2 children)
+- Configuration values are valid (e.g., positive retry attempts)
+
+## Supported Connectors
+
+- **sequence**: Sequential processing
+- **parallel/concurrent**: Parallel execution (requires `Cloner[T]`)
+- **race**: First successful result (requires `Cloner[T]`)
+- **fallback**: Try primary, fall back on error
+- **retry**: Retry with configurable attempts
+- **timeout**: Enforce time limits
+- **filter**: Conditional execution based on predicates
+- **switch**: Multi-way routing based on conditions
+
+## Design Philosophy
+
+- **Minimal API**: Registration (`Add*`, `Remove*`), Schema management (`SetSchema`, `GetSchema`, `RemoveSchema`), and Building (`Build`, `ValidateSchema`)
+- **Type Safety**: Full type safety through Go generics
+- **Zero Magic**: Processors name themselves, schemas are declarative
+- **Dynamic**: Hot-reload schemas without restarts
+- **Composable**: Build complex pipelines from simple, tested components
 
 ## License
 
-MIT
+Same as pipz - see LICENSE file.
