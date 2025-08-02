@@ -10,12 +10,14 @@ import (
 
 // Connector type constants.
 const (
-	connectorSequence   = "sequence"
-	connectorConcurrent = "concurrent"
-	connectorRace       = "race"
-	connectorFallback   = "fallback"
-	connectorRetry      = "retry"
-	connectorTimeout    = "timeout"
+	connectorSequence       = "sequence"
+	connectorConcurrent     = "concurrent"
+	connectorRace           = "race"
+	connectorFallback       = "fallback"
+	connectorRetry          = "retry"
+	connectorTimeout        = "timeout"
+	connectorCircuitBreaker = "circuit-breaker"
+	connectorRateLimit      = "rate-limit"
 )
 
 // buildSequence creates a sequence connector from schema.
@@ -278,4 +280,73 @@ func (f *Factory[T]) buildSwitch(node *Node) (pipz.Chainable[T], error) {
 	}
 
 	return sw, nil
+}
+
+// buildCircuitBreaker creates a circuit breaker connector from schema.
+func (f *Factory[T]) buildCircuitBreaker(node *Node) (pipz.Chainable[T], error) {
+	if node.Child == nil {
+		return nil, fmt.Errorf("circuit-breaker requires a child")
+	}
+
+	child, err := f.buildNode(node.Child)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build child: %w", err)
+	}
+
+	name := node.Name
+	if name == "" {
+		name = connectorCircuitBreaker
+	}
+
+	// Use failure threshold, default to 5 if not specified
+	failureThreshold := node.FailureThreshold
+	if failureThreshold == 0 {
+		failureThreshold = 5
+	}
+
+	// Parse recovery timeout, default to 60s if not specified
+	recoveryTimeout := 60 * time.Second
+	if node.RecoveryTimeout != "" {
+		parsed, err := time.ParseDuration(node.RecoveryTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid recovery timeout: %w", err)
+		}
+		recoveryTimeout = parsed
+	}
+
+	return pipz.NewCircuitBreaker(name, child, failureThreshold, recoveryTimeout), nil
+}
+
+// buildRateLimit creates a rate limiter connector from schema.
+func (f *Factory[T]) buildRateLimit(node *Node) (pipz.Chainable[T], error) {
+	if node.Child == nil {
+		return nil, fmt.Errorf("rate-limit requires a child")
+	}
+
+	child, err := f.buildNode(node.Child)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build child: %w", err)
+	}
+
+	name := node.Name
+	if name == "" {
+		name = connectorRateLimit
+	}
+
+	// Use requests per second, default to 10 if not specified
+	requestsPerSecond := node.RequestsPerSecond
+	if requestsPerSecond == 0 {
+		requestsPerSecond = 10
+	}
+
+	// Use burst size, default to 1 if not specified
+	burstSize := node.BurstSize
+	if burstSize == 0 {
+		burstSize = 1
+	}
+
+	// Create a sequence that chains rate limiter with the child
+	rateLimiter := pipz.NewRateLimiter[T](name+"_limiter", requestsPerSecond, burstSize)
+	sequence := pipz.NewSequence(name, rateLimiter, child)
+	return sequence, nil
 }

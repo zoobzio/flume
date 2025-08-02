@@ -42,4 +42,12 @@ type Node struct { //nolint:govet
 
 	// Timeout configuration
 	Duration string `json:"duration,omitempty" yaml:"duration,omitempty"`
+
+	// Circuit breaker configuration
+	FailureThreshold int    `json:"failure_threshold,omitempty" yaml:"failure_threshold,omitempty"`
+	RecoveryTimeout  string `json:"recovery_timeout,omitempty" yaml:"recovery_timeout,omitempty"`
+
+	// Rate limiter configuration
+	RequestsPerSecond float64 `json:"requests_per_second,omitempty" yaml:"requests_per_second,omitempty"`
+	BurstSize         int     `json:"burst_size,omitempty" yaml:"burst_size,omitempty"`
 }

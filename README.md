@@ -108,8 +108,7 @@ default:
 ```yaml
 # Retry
 type: retry
-config:
-  attempts: 3
+attempts: 3
 child:
   ref: flaky-operation
 
@@ -121,10 +120,23 @@ children:
 
 # Timeout
 type: timeout
-config:
-  duration: "30s"
+duration: "30s"
 child:
   ref: slow-operation
+
+# Circuit Breaker
+type: circuit-breaker
+failure_threshold: 5
+recovery_timeout: "60s"
+child:
+  ref: unreliable-service
+
+# Rate Limiting
+type: rate-limit
+requests_per_second: 10.0
+burst_size: 5
+child:
+  ref: expensive-operation
 ```
 
 ## Registration API
@@ -287,6 +299,8 @@ Validation checks:
 - **fallback**: Try primary, fall back on error
 - **retry**: Retry with configurable attempts
 - **timeout**: Enforce time limits
+- **circuit-breaker**: Circuit breaker pattern for fault tolerance
+- **rate-limit**: Rate limiting for controlling request throughput
 - **filter**: Conditional execution based on predicates
 - **switch**: Multi-way routing based on conditions
 

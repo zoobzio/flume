@@ -1305,3 +1305,208 @@ func TestBuildNodeErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCircuitBreaker(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	failureCount := 0
+	factory.Add(
+		pipz.Apply("failing", func(_ context.Context, d TestData) (TestData, error) {
+			failureCount++
+			if failureCount < 3 {
+				return d, errors.New("service failure")
+			}
+			d.Value = "success"
+			return d, nil
+		}),
+		pipz.Transform("stable", func(_ context.Context, d TestData) TestData {
+			d.Value = "stable"
+			return d
+		}),
+	)
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		expected    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "circuit breaker with stable processor",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:             "circuit-breaker",
+					FailureThreshold: 3,
+					RecoveryTimeout:  "30s",
+					Child:            &flume.Node{Ref: "stable"},
+				},
+			},
+			expected: "stable",
+		},
+		{
+			name: "circuit breaker with default values",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:  "circuit-breaker",
+					Child: &flume.Node{Ref: "stable"},
+				},
+			},
+			expected: "stable",
+		},
+		{
+			name: "circuit breaker with custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:             "circuit-breaker",
+					Name:             "custom-breaker",
+					FailureThreshold: 2,
+					Child:            &flume.Node{Ref: "stable"},
+				},
+			},
+			expected: "stable",
+		},
+		{
+			name: "circuit breaker without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "circuit-breaker",
+				},
+			},
+			expectError: true,
+			errorMsg:    "circuit-breaker requires a child",
+		},
+		{
+			name: "circuit breaker with invalid recovery timeout",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:            "circuit-breaker",
+					RecoveryTimeout: "invalid",
+					Child:           &flume.Node{Ref: "stable"},
+				},
+			},
+			expectError: true,
+			errorMsg:    "invalid recovery timeout",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failureCount = 0
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, TestData{})
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			if result.Value != tt.expected {
+				t.Errorf("Expected '%s', got '%s'", tt.expected, result.Value)
+			}
+		})
+	}
+}
+
+func TestBuildRateLimit(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	factory.Add(
+		pipz.Transform("processor", func(_ context.Context, d TestData) TestData {
+			d.Value = "processed"
+			return d
+		}),
+	)
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		expected    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "rate limit with custom values",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:              "rate-limit",
+					RequestsPerSecond: 100.0,
+					BurstSize:         10,
+					Child:             &flume.Node{Ref: "processor"},
+				},
+			},
+			expected: "processed",
+		},
+		{
+			name: "rate limit with default values",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:  "rate-limit",
+					Child: &flume.Node{Ref: "processor"},
+				},
+			},
+			expected: "processed",
+		},
+		{
+			name: "rate limit with custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:              "rate-limit",
+					Name:              "custom-limiter",
+					RequestsPerSecond: 50.0,
+					BurstSize:         5,
+					Child:             &flume.Node{Ref: "processor"},
+				},
+			},
+			expected: "processed",
+		},
+		{
+			name: "rate limit without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "rate-limit",
+				},
+			},
+			expectError: true,
+			errorMsg:    "rate-limit requires a child",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, TestData{})
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			if result.Value != tt.expected {
+				t.Errorf("Expected '%s', got '%s'", tt.expected, result.Value)
+			}
+		})
+	}
+}

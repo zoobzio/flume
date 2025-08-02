@@ -131,6 +131,10 @@ func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *
 		f.validateFilter(node, path, errors, visitedRefs)
 	case "switch":
 		f.validateSwitch(node, path, errors, visitedRefs)
+	case "circuit-breaker":
+		f.validateCircuitBreaker(node, path, errors, visitedRefs)
+	case "rate-limit":
+		f.validateRateLimit(node, path, errors, visitedRefs)
 	default:
 		*errors = append(*errors, ValidationError{
 			Path:    path,
@@ -339,4 +343,60 @@ func (f *Factory[T]) validateSwitch(node *Node, path []string, errors *Validatio
 		defaultPath := append(append([]string(nil), path...), "default")
 		f.validateNodeWithVisited(node.Default, defaultPath, errors, visitedRefs)
 	}
+}
+
+// validateCircuitBreaker validates a circuit breaker node.
+func (f *Factory[T]) validateCircuitBreaker(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "circuit-breaker requires a child",
+		})
+		return
+	}
+
+	// Validate recovery timeout if specified
+	if node.RecoveryTimeout != "" {
+		if _, err := time.ParseDuration(node.RecoveryTimeout); err != nil {
+			*errors = append(*errors, ValidationError{
+				Path:    path,
+				Message: fmt.Sprintf("invalid recovery timeout: %v", err),
+			})
+		}
+	}
+
+	// Validate child
+	childPath := append(append([]string(nil), path...), "child")
+	f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)
+}
+
+// validateRateLimit validates a rate limiter node.
+func (f *Factory[T]) validateRateLimit(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "rate-limit requires a child",
+		})
+		return
+	}
+
+	// Validate requests per second if specified
+	if node.RequestsPerSecond < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "requests_per_second must be non-negative",
+		})
+	}
+
+	// Validate burst size if specified
+	if node.BurstSize < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "burst_size must be non-negative",
+		})
+	}
+
+	// Validate child
+	childPath := append(append([]string(nil), path...), "child")
+	f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)
 }

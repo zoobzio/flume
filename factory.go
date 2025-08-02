@@ -172,6 +172,10 @@ func (f *Factory[T]) buildNode(node *Node) (pipz.Chainable[T], error) {
 		return f.buildFilter(node)
 	case "switch":
 		return f.buildSwitch(node)
+	case "circuit-breaker":
+		return f.buildCircuitBreaker(node)
+	case "rate-limit":
+		return f.buildRateLimit(node)
 	default:
 		return nil, fmt.Errorf("unknown node type: %s", node.Type)
 	}
