@@ -229,7 +229,7 @@ func TestBuildFromJSON(t *testing.T) {
 			name:          "empty JSON",
 			json:          `{}`,
 			expectError:   true,
-			errorContains: "node must have either 'ref' or 'type'",
+			errorContains: "empty node - must have either ref, type, or stream",
 		},
 		{
 			name:          "missing processor",
@@ -363,7 +363,7 @@ children:
 			name:          "empty YAML",
 			yaml:          "",
 			expectError:   true,
-			errorContains: "node must have either 'ref' or 'type'",
+			errorContains: "empty node - must have either ref, type, or stream",
 		},
 		{
 			name:          "missing processor",

@@ -1,3 +1,55 @@
+// Package flume provides a dynamic pipeline factory for pipz that enables
+// schema-driven pipeline construction with hot-reloading capabilities.
+//
+// Flume allows you to define pipelines using declarative YAML/JSON schemas
+// instead of imperative code. It supports registering reusable processors,
+// predicates, and conditions that can be composed into complex pipelines
+// through configuration rather than compilation.
+//
+// Key features:
+//   - Schema-driven pipeline construction (YAML/JSON)
+//   - Hot-reloading of pipeline definitions without restarts
+//   - Type-safe pipeline building through Go generics
+//   - Integration with streamz for terminal stream processing
+//   - Comprehensive validation with detailed error reporting
+//   - Support for all pipz connector types (sequence, parallel, retry, etc.)
+//
+// Basic usage:
+//
+//	factory := flume.New[MyData]()
+//	factory.Add(pipz.Apply("validate", validateFunc))
+//	factory.AddPredicate(flume.Predicate[MyData]{
+//	    Name: "is-valid",
+//	    Predicate: func(ctx context.Context, d MyData) bool { return d.Valid },
+//	})
+//
+//	schema := `
+//	type: sequence
+//	children:
+//	  - ref: validate
+//	  - type: filter
+//	    predicate: is-valid
+//	    then:
+//	      ref: process
+//	`
+//
+//	pipeline, err := factory.BuildFromYAML(schema)
+//	result, err := pipeline.Process(ctx, data)
+//
+// Stream Integration:
+//
+// Flume integrates with streamz to support stream termination nodes.
+// Streams act as terminal endpoints for synchronous pipelines:
+//
+//	stream := streamz.NewFlumeStream("output", 100, myStreamPipeline)
+//	factory.AddStream("output", stream)
+//
+//	schema := `
+//	type: sequence
+//	children:
+//	  - ref: process
+//	  - stream: output  # Terminal node sends to stream
+//	`
 package flume
 
 import (
@@ -30,11 +82,10 @@ type Factory[T pipz.Cloner[T]] struct {
 	processors map[pipz.Name]pipz.Chainable[T]
 	predicates map[pipz.Name]func(context.Context, T) bool
 	conditions map[pipz.Name]func(context.Context, T) string
-
-	// Dynamic schema registry with atomic updates
-	schemas   map[string]*Schema
-	pipelines map[string]*atomic.Pointer[pipz.Chainable[T]]
-	mu        sync.RWMutex
+	schemas    map[string]*Schema
+	pipelines  map[string]*atomic.Pointer[pipz.Chainable[T]]
+	channels   map[string]chan<- T
+	mu         sync.RWMutex
 }
 
 // New creates a new Factory for type T.
@@ -46,6 +97,7 @@ func New[T pipz.Cloner[T]]() *Factory[T] {
 		conditions: make(map[pipz.Name]func(context.Context, T) string),
 		schemas:    make(map[string]*Schema),
 		pipelines:  make(map[string]*atomic.Pointer[pipz.Chainable[T]]),
+		channels:   make(map[string]chan<- T),
 	}
 
 	zlog.Emit(FactoryCreated, "Flume factory created",
@@ -177,6 +229,10 @@ func (f *Factory[T]) buildNode(node *Node) (pipz.Chainable[T], error) {
 	case "rate-limit":
 		return f.buildRateLimit(node)
 	default:
+		// Check if it's a stream reference
+		if node.Stream != "" {
+			return f.buildStream(node)
+		}
 		return nil, fmt.Errorf("unknown node type: %s", node.Type)
 	}
 }
@@ -371,6 +427,63 @@ func (f *Factory[T]) Remove(names ...pipz.Name) int {
 		}
 	}
 	return removed
+}
+
+// AddChannel registers a channel with the factory.
+// Channels can then be referenced by name in schemas as stream nodes.
+func (f *Factory[T]) AddChannel(name string, channel chan<- T) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.channels[name] = channel
+
+	zlog.Emit(ProcessorRegistered, "Channel registered",
+		zlog.String("name", name))
+}
+
+// GetChannel retrieves a registered channel by name.
+func (f *Factory[T]) GetChannel(name string) (chan<- T, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	channel, exists := f.channels[name]
+	return channel, exists
+}
+
+// HasChannel checks if a channel is registered.
+func (f *Factory[T]) HasChannel(name string) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	_, exists := f.channels[name]
+	return exists
+}
+
+// ListChannels returns a list of all registered channel names.
+func (f *Factory[T]) ListChannels() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	names := make([]string, 0, len(f.channels))
+	for name := range f.channels {
+		names = append(names, name)
+	}
+	return names
+}
+
+// RemoveChannel removes a channel from the factory.
+func (f *Factory[T]) RemoveChannel(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, exists := f.channels[name]; exists {
+		delete(f.channels, name)
+
+		zlog.Emit(ProcessorRemoved, "Channel removed",
+			zlog.String("name", name))
+		return true
+	}
+	return false
 }
 
 // RemovePredicate removes one or more predicates from the factory.

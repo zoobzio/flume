@@ -77,7 +77,7 @@ func TestValidation(t *testing.T) {
 				},
 			},
 			expectedErrors: []string{
-				"node must have either 'ref' or 'type'",
+				"empty node - must have either ref, type, or stream",
 			},
 		},
 		{

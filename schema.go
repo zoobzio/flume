@@ -50,4 +50,7 @@ type Node struct { //nolint:govet
 	// Rate limiter configuration
 	RequestsPerSecond float64 `json:"requests_per_second,omitempty" yaml:"requests_per_second,omitempty"`
 	BurstSize         int     `json:"burst_size,omitempty" yaml:"burst_size,omitempty"`
+
+	// Stream configuration
+	Stream string `json:"stream,omitempty" yaml:"stream,omitempty"`
 }

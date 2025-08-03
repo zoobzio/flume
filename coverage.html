@@ -1,0 +1,1562 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>flume: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/zoobzio/flume/builders.go (82.2%)</option>
+				
+				<option value="file1">github.com/zoobzio/flume/factory.go (94.9%)</option>
+				
+				<option value="file2">github.com/zoobzio/flume/loader.go (100.0%)</option>
+				
+				<option value="file3">github.com/zoobzio/flume/stream.go (100.0%)</option>
+				
+				<option value="file4">github.com/zoobzio/flume/validation.go (95.4%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package flume
+
+import (
+        "context"
+        "fmt"
+        "time"
+
+        "github.com/zoobzio/pipz"
+)
+
+// Connector type constants.
+const (
+        connectorSequence       = "sequence"
+        connectorConcurrent     = "concurrent"
+        connectorRace           = "race"
+        connectorFallback       = "fallback"
+        connectorRetry          = "retry"
+        connectorTimeout        = "timeout"
+        connectorCircuitBreaker = "circuit-breaker"
+        connectorRateLimit      = "rate-limit"
+)
+
+// buildSequence creates a sequence connector from schema.
+func (f *Factory[T]) buildSequence(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if len(node.Children) == 0 </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("sequence requires at least one child")
+        }</span>
+
+        <span class="cov8" title="1">children := make([]pipz.Chainable[T], 0, len(node.Children))
+        for i := range node.Children </span><span class="cov8" title="1">{
+                processor, err := f.buildNode(&amp;node.Children[i])
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to build child %d: %w", i, err)
+                }</span>
+                <span class="cov8" title="1">children = append(children, processor)</span>
+        }
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorSequence
+        }</span>
+
+        <span class="cov8" title="1">return pipz.NewSequence(pipz.Name(name), children...), nil</span> //nolint:unconvert
+}
+
+// buildConcurrent creates a concurrent connector from schema.
+func (f *Factory[T]) buildConcurrent(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if len(node.Children) == 0 </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("concurrent requires at least one child")
+        }</span>
+
+        <span class="cov8" title="1">children := make([]pipz.Chainable[T], 0, len(node.Children))
+        for i := range node.Children </span><span class="cov8" title="1">{
+                processor, err := f.buildNode(&amp;node.Children[i])
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to build child %d: %w", i, err)
+                }</span>
+                <span class="cov8" title="1">children = append(children, processor)</span>
+        }
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorConcurrent
+        }</span>
+
+        <span class="cov8" title="1">return pipz.NewConcurrent[T](pipz.Name(name), children...), nil</span> //nolint:unconvert
+}
+
+// buildRace creates a race connector from schema.
+func (f *Factory[T]) buildRace(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if len(node.Children) == 0 </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("race requires at least one child")
+        }</span>
+
+        <span class="cov8" title="1">children := make([]pipz.Chainable[T], 0, len(node.Children))
+        for i := range node.Children </span><span class="cov8" title="1">{
+                processor, err := f.buildNode(&amp;node.Children[i])
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to build child %d: %w", i, err)
+                }</span>
+                <span class="cov8" title="1">children = append(children, processor)</span>
+        }
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorRace
+        }</span>
+
+        <span class="cov8" title="1">return pipz.NewRace[T](pipz.Name(name), children...), nil</span> //nolint:unconvert
+}
+
+// buildFallback creates a fallback connector from schema.
+func (f *Factory[T]) buildFallback(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if len(node.Children) != 2 </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("fallback requires exactly 2 children")
+        }</span>
+
+        <span class="cov8" title="1">primary, err := f.buildNode(&amp;node.Children[0])
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build primary: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">fallback, err := f.buildNode(&amp;node.Children[1])
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build fallback: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorFallback
+        }</span>
+
+        <span class="cov8" title="1">return pipz.NewFallback(pipz.Name(name), primary, fallback), nil</span> //nolint:unconvert
+}
+
+// buildRetry creates a retry connector from schema.
+func (f *Factory[T]) buildRetry(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("retry requires a child")
+        }</span>
+
+        <span class="cov8" title="1">child, err := f.buildNode(node.Child)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build child: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                if node.Backoff != "" </span><span class="cov8" title="1">{
+                        name = "backoff"
+                }</span> else<span class="cov8" title="1"> {
+                        name = connectorRetry
+                }</span>
+        }
+
+        // If backoff is specified, use NewBackoff instead of NewRetry
+        <span class="cov8" title="1">if node.Backoff != "" </span><span class="cov8" title="1">{
+                // Parse backoff duration
+                backoff, err := time.ParseDuration(node.Backoff)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("invalid backoff duration: %w", err)
+                }</span>
+
+                // Use attempts field, default to 3 if not specified
+                <span class="cov8" title="1">attempts := node.Attempts
+                if attempts == 0 </span><span class="cov0" title="0">{
+                        attempts = 3
+                }</span>
+
+                <span class="cov8" title="1">return pipz.NewBackoff(pipz.Name(name), child, attempts, backoff), nil</span> //nolint:unconvert
+        }
+
+        // Use attempts field, default to 3 if not specified
+        <span class="cov8" title="1">attempts := node.Attempts
+        if attempts == 0 </span><span class="cov8" title="1">{
+                attempts = 3
+        }</span>
+
+        <span class="cov8" title="1">return pipz.NewRetry(pipz.Name(name), child, attempts), nil</span> //nolint:unconvert
+}
+
+// buildTimeout creates a timeout connector from schema.
+func (f *Factory[T]) buildTimeout(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("timeout requires a child")
+        }</span>
+
+        <span class="cov8" title="1">child, err := f.buildNode(node.Child)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build child: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorTimeout
+        }</span>
+
+        // Parse duration, default to 30s if not specified
+        <span class="cov8" title="1">duration := 30 * time.Second
+        if node.Duration != "" </span><span class="cov8" title="1">{
+                parsed, err := time.ParseDuration(node.Duration)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("invalid duration: %w", err)
+                }</span>
+                <span class="cov8" title="1">duration = parsed</span>
+        }
+
+        <span class="cov8" title="1">return pipz.NewTimeout(pipz.Name(name), child, duration), nil</span> //nolint:unconvert
+}
+
+// buildFilter creates a filter connector from schema.
+func (f *Factory[T]) buildFilter(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Predicate == "" </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("filter requires a predicate")
+        }</span>
+        <span class="cov8" title="1">if node.Then == nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("filter requires a then branch")
+        }</span>
+
+        <span class="cov8" title="1">predicate, exists := f.predicates[pipz.Name(node.Predicate)] //nolint:unconvert
+        if !exists </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("predicate not found: %s", node.Predicate)
+        }</span>
+
+        <span class="cov8" title="1">then, err := f.buildNode(node.Then)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build then branch: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = fmt.Sprintf("filter-%s", node.Predicate)
+        }</span>
+
+        // If no else branch, data passes through unchanged when predicate is false
+        <span class="cov8" title="1">if node.Else == nil </span><span class="cov8" title="1">{
+                return pipz.NewFilter[T](pipz.Name(name), predicate, then), nil //nolint:unconvert
+        }</span>
+
+        // Build else branch and create a custom filter
+        <span class="cov8" title="1">elseBranch, err := f.buildNode(node.Else)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build else branch: %w", err)
+        }</span>
+
+        // Create a processor that routes based on the predicate
+        <span class="cov8" title="1">return pipz.Apply(pipz.Name(name), func(ctx context.Context, data T) (T, error) </span><span class="cov8" title="1">{ //nolint:unconvert
+                if predicate(ctx, data) </span><span class="cov8" title="1">{
+                        return then.Process(ctx, data)
+                }</span>
+                <span class="cov8" title="1">return elseBranch.Process(ctx, data)</span>
+        }), nil
+}
+
+// buildSwitch creates a switch connector from schema.
+func (f *Factory[T]) buildSwitch(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Condition == "" </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("switch requires a condition")
+        }</span>
+        <span class="cov8" title="1">if len(node.Routes) == 0 </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("switch requires at least one route")
+        }</span>
+
+        <span class="cov8" title="1">condition, exists := f.conditions[pipz.Name(node.Condition)] //nolint:unconvert
+        if !exists </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("condition not found: %s", node.Condition)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = fmt.Sprintf("switch-%s", node.Condition)
+        }</span>
+
+        // Build all routes
+        <span class="cov8" title="1">routes := make(map[string]pipz.Chainable[T])
+        for key := range node.Routes </span><span class="cov8" title="1">{
+                routeNode := node.Routes[key]
+                route, err := f.buildNode(&amp;routeNode)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to build route %s: %w", key, err)
+                }</span>
+                <span class="cov8" title="1">routes[key] = route</span>
+        }
+
+        // Create switch
+        <span class="cov8" title="1">sw := pipz.NewSwitch(pipz.Name(name), condition) //nolint:unconvert
+        for key, route := range routes </span><span class="cov8" title="1">{
+                sw.AddRoute(key, route)
+        }</span>
+
+        // If there's a default route, add it as a special key
+        <span class="cov8" title="1">if node.Default != nil </span><span class="cov8" title="1">{
+                // For simplicity, we'll document that users should handle default in their condition function
+                // by returning a special "default" key when no other condition matches
+                defaultRoute, err := f.buildNode(node.Default)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to build default route: %w", err)
+                }</span>
+                <span class="cov8" title="1">sw.AddRoute("default", defaultRoute)</span>
+        }
+
+        <span class="cov8" title="1">return sw, nil</span>
+}
+
+// buildCircuitBreaker creates a circuit breaker connector from schema.
+func (f *Factory[T]) buildCircuitBreaker(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("circuit-breaker requires a child")
+        }</span>
+
+        <span class="cov8" title="1">child, err := f.buildNode(node.Child)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build child: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorCircuitBreaker
+        }</span>
+
+        // Use failure threshold, default to 5 if not specified
+        <span class="cov8" title="1">failureThreshold := node.FailureThreshold
+        if failureThreshold == 0 </span><span class="cov8" title="1">{
+                failureThreshold = 5
+        }</span>
+
+        // Parse recovery timeout, default to 60s if not specified
+        <span class="cov8" title="1">recoveryTimeout := 60 * time.Second
+        if node.RecoveryTimeout != "" </span><span class="cov8" title="1">{
+                parsed, err := time.ParseDuration(node.RecoveryTimeout)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("invalid recovery timeout: %w", err)
+                }</span>
+                <span class="cov8" title="1">recoveryTimeout = parsed</span>
+        }
+
+        <span class="cov8" title="1">return pipz.NewCircuitBreaker(name, child, failureThreshold, recoveryTimeout), nil</span>
+}
+
+// buildRateLimit creates a rate limiter connector from schema.
+func (f *Factory[T]) buildRateLimit(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("rate-limit requires a child")
+        }</span>
+
+        <span class="cov8" title="1">child, err := f.buildNode(node.Child)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to build child: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">name := node.Name
+        if name == "" </span><span class="cov8" title="1">{
+                name = connectorRateLimit
+        }</span>
+
+        // Use requests per second, default to 10 if not specified
+        <span class="cov8" title="1">requestsPerSecond := node.RequestsPerSecond
+        if requestsPerSecond == 0 </span><span class="cov8" title="1">{
+                requestsPerSecond = 10
+        }</span>
+
+        // Use burst size, default to 1 if not specified
+        <span class="cov8" title="1">burstSize := node.BurstSize
+        if burstSize == 0 </span><span class="cov8" title="1">{
+                burstSize = 1
+        }</span>
+
+        // Create a sequence that chains rate limiter with the child
+        <span class="cov8" title="1">rateLimiter := pipz.NewRateLimiter[T](name+"_limiter", requestsPerSecond, burstSize)
+        sequence := pipz.NewSequence(name, rateLimiter, child)
+        return sequence, nil</span>
+}
+
+// buildStream creates a stream terminator from schema.
+func (f *Factory[T]) buildStream(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        if node.Stream == "" </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("stream node requires a stream name")
+        }</span>
+
+        <span class="cov8" title="1">stream, exists := f.streams[node.Stream]
+        if !exists </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("stream not found: %s", node.Stream)
+        }</span>
+
+        <span class="cov8" title="1">return NewStreamTerminator[T](stream), nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package flume
+
+import (
+        "context"
+        "fmt"
+        "sync"
+        "sync/atomic"
+        "time"
+
+        "github.com/zoobzio/pipz"
+        "github.com/zoobzio/zlog"
+)
+
+// Predicate combines a name with a predicate function for batch registration.
+type Predicate[T any] struct { //nolint:govet
+        Name      pipz.Name
+        Predicate func(context.Context, T) bool
+}
+
+// Condition combines a name with a condition function for batch registration.
+type Condition[T any] struct { //nolint:govet
+        Name      pipz.Name
+        Condition func(context.Context, T) string
+}
+
+// Factory creates dynamic pipelines from schemas using registered components.
+// It maintains three registries: processors, predicates, and conditions.
+// T must implement pipz.Cloner[T] to support parallel processing.
+type Factory[T pipz.Cloner[T]] struct {
+        processors map[pipz.Name]pipz.Chainable[T]
+        predicates map[pipz.Name]func(context.Context, T) bool
+        conditions map[pipz.Name]func(context.Context, T) string
+
+        // Dynamic schema registry with atomic updates
+        schemas   map[string]*Schema
+        pipelines map[string]*atomic.Pointer[pipz.Chainable[T]]
+        mu        sync.RWMutex
+
+        // Stream registry for pre-built streaming pipelines
+        streams map[string]Stream[T]
+}
+
+// New creates a new Factory for type T.
+// T must implement pipz.Cloner[T] to support parallel processing.
+func New[T pipz.Cloner[T]]() *Factory[T] <span class="cov8" title="1">{
+        factory := &amp;Factory[T]{
+                processors: make(map[pipz.Name]pipz.Chainable[T]),
+                predicates: make(map[pipz.Name]func(context.Context, T) bool),
+                conditions: make(map[pipz.Name]func(context.Context, T) string),
+                schemas:    make(map[string]*Schema),
+                pipelines:  make(map[string]*atomic.Pointer[pipz.Chainable[T]]),
+                streams:    make(map[string]Stream[T]),
+        }
+
+        zlog.Emit(FactoryCreated, "Flume factory created",
+                zlog.String("type", fmt.Sprintf("%T", *new(T))))
+
+        return factory
+}</span>
+
+// Add registers one or more processors to the factory using their intrinsic names.
+func (f *Factory[T]) Add(processors ...pipz.Chainable[T]) <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        for _, processor := range processors </span><span class="cov8" title="1">{
+                f.processors[processor.Name()] = processor
+
+                zlog.Emit(ProcessorRegistered, "Processor registered",
+                        zlog.String("name", string(processor.Name()))) //nolint:unconvert
+        }</span>
+}
+
+// AddPredicate registers one or more boolean predicates for use in filter conditions.
+func (f *Factory[T]) AddPredicate(predicates ...Predicate[T]) <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        for _, p := range predicates </span><span class="cov8" title="1">{
+                f.predicates[p.Name] = p.Predicate
+
+                zlog.Emit(PredicateRegistered, "Predicate registered",
+                        zlog.String("name", string(p.Name))) //nolint:unconvert
+        }</span>
+}
+
+// AddCondition registers one or more string-returning conditions for use in switch routing.
+func (f *Factory[T]) AddCondition(conditions ...Condition[T]) <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        for _, c := range conditions </span><span class="cov8" title="1">{
+                f.conditions[c.Name] = c.Condition
+
+                zlog.Emit(ConditionRegistered, "Condition registered",
+                        zlog.String("name", string(c.Name))) //nolint:unconvert
+        }</span>
+}
+
+// Build creates a pipeline from a schema.
+func (f *Factory[T]) Build(schema Schema) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        start := time.Now()
+
+        // Log build start with version if present
+        startFields := []zlog.Field{}
+        if schema.Version != "" </span><span class="cov8" title="1">{
+                startFields = append(startFields, zlog.String("version", schema.Version))
+        }</span>
+        <span class="cov8" title="1">zlog.Emit(SchemaBuildStarted, "Schema build started", startFields...)
+
+        // Validate first
+        if err := f.ValidateSchema(schema); err != nil </span><span class="cov8" title="1">{
+                failFields := []zlog.Field{
+                        zlog.String("error", err.Error()),
+                        zlog.Duration("duration", time.Since(start)),
+                }
+                if schema.Version != "" </span><span class="cov0" title="0">{
+                        failFields = append(failFields, zlog.String("version", schema.Version))
+                }</span>
+                <span class="cov8" title="1">zlog.Emit(SchemaBuildFailed, "Schema build failed during validation", failFields...)
+                return nil, err</span>
+        }
+
+        <span class="cov8" title="1">f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        pipeline, err := f.buildNode(&amp;schema.Node)
+        if err != nil </span><span class="cov0" title="0">{
+                failFields := []zlog.Field{
+                        zlog.String("error", err.Error()),
+                        zlog.Duration("duration", time.Since(start)),
+                }
+                if schema.Version != "" </span><span class="cov0" title="0">{
+                        failFields = append(failFields, zlog.String("version", schema.Version))
+                }</span>
+                <span class="cov0" title="0">zlog.Emit(SchemaBuildFailed, "Schema build failed during construction", failFields...)
+                return nil, err</span>
+        }
+
+        <span class="cov8" title="1">completeFields := []zlog.Field{
+                zlog.Duration("duration", time.Since(start)),
+        }
+        if schema.Version != "" </span><span class="cov8" title="1">{
+                completeFields = append(completeFields, zlog.String("version", schema.Version))
+        }</span>
+        <span class="cov8" title="1">zlog.Emit(SchemaBuildCompleted, "Schema build completed", completeFields...)
+        return pipeline, nil</span>
+}
+
+// buildNode recursively builds a pipeline node.
+func (f *Factory[T]) buildNode(node *Node) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        // Handle processor reference
+        if node.Ref != "" </span><span class="cov8" title="1">{
+                processor, exists := f.processors[pipz.Name(node.Ref)] //nolint:unconvert
+                if !exists </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("processor not found: %s", node.Ref)
+                }</span>
+                <span class="cov8" title="1">return processor, nil</span>
+        }
+
+        // Handle connector types
+        <span class="cov8" title="1">switch node.Type </span>{
+        case "sequence":<span class="cov8" title="1">
+                return f.buildSequence(node)</span>
+        case "parallel", "concurrent":<span class="cov8" title="1">
+                return f.buildConcurrent(node)</span>
+        case "race":<span class="cov8" title="1">
+                return f.buildRace(node)</span>
+        case "fallback":<span class="cov8" title="1">
+                return f.buildFallback(node)</span>
+        case "retry":<span class="cov8" title="1">
+                return f.buildRetry(node)</span>
+        case "timeout":<span class="cov8" title="1">
+                return f.buildTimeout(node)</span>
+        case "filter":<span class="cov8" title="1">
+                return f.buildFilter(node)</span>
+        case "switch":<span class="cov8" title="1">
+                return f.buildSwitch(node)</span>
+        case "circuit-breaker":<span class="cov8" title="1">
+                return f.buildCircuitBreaker(node)</span>
+        case "rate-limit":<span class="cov8" title="1">
+                return f.buildRateLimit(node)</span>
+        default:<span class="cov8" title="1">
+                // Check if it's a stream reference
+                if node.Stream != "" </span><span class="cov8" title="1">{
+                        return f.buildStream(node)
+                }</span>
+                <span class="cov0" title="0">return nil, fmt.Errorf("unknown node type: %s", node.Type)</span>
+        }
+}
+
+// SetSchema adds or updates a named schema and builds its pipeline.
+func (f *Factory[T]) SetSchema(name string, schema Schema) error <span class="cov8" title="1">{
+        // Validate first (Build will also validate, but this gives clearer error context)
+        if err := f.ValidateSchema(schema); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("invalid schema %s: %w", name, err)
+        }</span>
+
+        <span class="cov8" title="1">pipeline, err := f.Build(schema)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to build schema %s: %w", name, err)
+        }</span>
+
+        <span class="cov8" title="1">f.mu.Lock()
+        defer f.mu.Unlock()
+
+        // Check if updating existing schema
+        oldSchema := f.schemas[name]
+        isUpdate := oldSchema != nil
+
+        f.schemas[name] = &amp;schema
+        if ptr, exists := f.pipelines[name]; exists </span><span class="cov8" title="1">{
+                ptr.Store(&amp;pipeline)
+        }</span> else<span class="cov8" title="1"> {
+                ptr := &amp;atomic.Pointer[pipz.Chainable[T]]{}
+                ptr.Store(&amp;pipeline)
+                f.pipelines[name] = ptr
+        }</span>
+
+        <span class="cov8" title="1">if isUpdate </span><span class="cov8" title="1">{
+                fields := []zlog.Field{
+                        zlog.String("name", name),
+                }
+                if oldSchema.Version != "" </span><span class="cov8" title="1">{
+                        fields = append(fields, zlog.String("old_version", oldSchema.Version))
+                }</span>
+                <span class="cov8" title="1">if schema.Version != "" </span><span class="cov8" title="1">{
+                        fields = append(fields, zlog.String("new_version", schema.Version))
+                }</span>
+                <span class="cov8" title="1">zlog.Emit(SchemaUpdated, "Schema updated", fields...)</span>
+        } else<span class="cov8" title="1"> {
+                fields := []zlog.Field{
+                        zlog.String("name", name),
+                }
+                if schema.Version != "" </span><span class="cov8" title="1">{
+                        fields = append(fields, zlog.String("version", schema.Version))
+                }</span>
+                <span class="cov8" title="1">zlog.Emit(SchemaRegistered, "Schema registered", fields...)</span>
+        }
+        <span class="cov8" title="1">return nil</span>
+}
+
+// Pipeline returns the current pipeline for a named schema.
+// Returns the pipeline and true if found, or nil and false if not found.
+func (f *Factory[T]) Pipeline(name string) (pipz.Chainable[T], bool) <span class="cov8" title="1">{
+        f.mu.RLock()
+        ptr := f.pipelines[name]
+        f.mu.RUnlock()
+
+        if ptr == nil </span><span class="cov8" title="1">{
+                zlog.Emit(PipelineRetrieved, "Pipeline retrieved",
+                        zlog.String("name", name),
+                        zlog.Bool("found", false))
+                return nil, false
+        }</span>
+
+        <span class="cov8" title="1">zlog.Emit(PipelineRetrieved, "Pipeline retrieved",
+                zlog.String("name", name),
+                zlog.Bool("found", true))
+        return *ptr.Load(), true</span>
+}
+
+// GetSchema returns a schema by name.
+// Returns the schema and true if found, or an empty schema and false if not found.
+func (f *Factory[T]) GetSchema(name string) (Schema, bool) <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        if schema, exists := f.schemas[name]; exists </span><span class="cov8" title="1">{
+                return *schema, true
+        }</span>
+        <span class="cov8" title="1">return Schema{}, false</span>
+}
+
+// RemoveSchema removes a named schema and its pipeline.
+// Returns true if the schema was removed, false if it didn't exist.
+func (f *Factory[T]) RemoveSchema(name string) bool <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        if _, exists := f.schemas[name]; !exists </span><span class="cov8" title="1">{
+                return false
+        }</span>
+
+        <span class="cov8" title="1">delete(f.schemas, name)
+        delete(f.pipelines, name)
+
+        zlog.Emit(SchemaRemoved, "Schema removed",
+                zlog.String("name", name))
+        return true</span>
+}
+
+// ListSchemas returns a list of all registered schema names.
+func (f *Factory[T]) ListSchemas() []string <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        names := make([]string, 0, len(f.schemas))
+        for name := range f.schemas </span><span class="cov8" title="1">{
+                names = append(names, name)
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// HasProcessor checks if a processor is registered.
+func (f *Factory[T]) HasProcessor(name pipz.Name) bool <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        _, exists := f.processors[name]
+        return exists
+}</span>
+
+// HasPredicate checks if a predicate is registered.
+func (f *Factory[T]) HasPredicate(name pipz.Name) bool <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        _, exists := f.predicates[name]
+        return exists
+}</span>
+
+// HasCondition checks if a condition is registered.
+func (f *Factory[T]) HasCondition(name pipz.Name) bool <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        _, exists := f.conditions[name]
+        return exists
+}</span>
+
+// ListProcessors returns a slice of all registered processor names.
+func (f *Factory[T]) ListProcessors() []pipz.Name <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        names := make([]pipz.Name, 0, len(f.processors))
+        for name := range f.processors </span><span class="cov8" title="1">{
+                names = append(names, name)
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// ListPredicates returns a slice of all registered predicate names.
+func (f *Factory[T]) ListPredicates() []pipz.Name <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        names := make([]pipz.Name, 0, len(f.predicates))
+        for name := range f.predicates </span><span class="cov8" title="1">{
+                names = append(names, name)
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// ListConditions returns a slice of all registered condition names.
+func (f *Factory[T]) ListConditions() []pipz.Name <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        names := make([]pipz.Name, 0, len(f.conditions))
+        for name := range f.conditions </span><span class="cov8" title="1">{
+                names = append(names, name)
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// Remove removes one or more processors from the factory.
+// Returns the number of processors actually removed.
+func (f *Factory[T]) Remove(names ...pipz.Name) int <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        removed := 0
+        for _, name := range names </span><span class="cov8" title="1">{
+                if _, exists := f.processors[name]; exists </span><span class="cov8" title="1">{
+                        delete(f.processors, name)
+                        removed++
+
+                        zlog.Emit(ProcessorRemoved, "Processor removed",
+                                zlog.String("name", string(name))) //nolint:unconvert
+                }</span>
+        }
+        <span class="cov8" title="1">return removed</span>
+}
+
+// AddStream registers a pre-built streaming pipeline with the factory.
+// Streams can then be referenced by name in schemas as terminal nodes.
+func (f *Factory[T]) AddStream(name string, stream Stream[T]) <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        f.streams[name] = stream
+
+        zlog.Emit(ProcessorRegistered, "Stream registered",
+                zlog.String("name", name))
+}</span>
+
+// GetStream retrieves a registered stream by name.
+func (f *Factory[T]) GetStream(name string) (Stream[T], bool) <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        stream, exists := f.streams[name]
+        return stream, exists
+}</span>
+
+// HasStream checks if a stream is registered.
+func (f *Factory[T]) HasStream(name string) bool <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        _, exists := f.streams[name]
+        return exists
+}</span>
+
+// ListStreams returns a list of all registered stream names.
+func (f *Factory[T]) ListStreams() []string <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        names := make([]string, 0, len(f.streams))
+        for name := range f.streams </span><span class="cov8" title="1">{
+                names = append(names, name)
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// RemoveStream removes a stream from the factory.
+func (f *Factory[T]) RemoveStream(name string) bool <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        if _, exists := f.streams[name]; exists </span><span class="cov8" title="1">{
+                delete(f.streams, name)
+
+                zlog.Emit(ProcessorRemoved, "Stream removed",
+                        zlog.String("name", name))
+                return true
+        }</span>
+        <span class="cov8" title="1">return false</span>
+}
+
+// RemovePredicate removes one or more predicates from the factory.
+// Returns the number of predicates actually removed.
+func (f *Factory[T]) RemovePredicate(names ...pipz.Name) int <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        removed := 0
+        for _, name := range names </span><span class="cov8" title="1">{
+                if _, exists := f.predicates[name]; exists </span><span class="cov8" title="1">{
+                        delete(f.predicates, name)
+                        removed++
+
+                        zlog.Emit(PredicateRemoved, "Predicate removed",
+                                zlog.String("name", string(name))) //nolint:unconvert
+                }</span>
+        }
+        <span class="cov8" title="1">return removed</span>
+}
+
+// RemoveCondition removes one or more conditions from the factory.
+// Returns the number of conditions actually removed.
+func (f *Factory[T]) RemoveCondition(names ...pipz.Name) int <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+
+        removed := 0
+        for _, name := range names </span><span class="cov8" title="1">{
+                if _, exists := f.conditions[name]; exists </span><span class="cov8" title="1">{
+                        delete(f.conditions, name)
+                        removed++
+
+                        zlog.Emit(ConditionRemoved, "Condition removed",
+                                zlog.String("name", string(name))) //nolint:unconvert
+                }</span>
+        }
+        <span class="cov8" title="1">return removed</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package flume
+
+import (
+        "encoding/json"
+        "fmt"
+        "os"
+        "path/filepath"
+        "strings"
+
+        "github.com/zoobzio/pipz"
+        "github.com/zoobzio/zlog"
+        "gopkg.in/yaml.v3"
+)
+
+// BuildFromFile loads a schema from a file and builds the pipeline.
+// Supports JSON and YAML formats based on file extension.
+func (f *Factory[T]) BuildFromFile(path string) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        data, err := os.ReadFile(path)
+        if err != nil </span><span class="cov8" title="1">{
+                zlog.Emit(SchemaFileFailed, "Failed to read schema file",
+                        zlog.String("path", path),
+                        zlog.String("error", err.Error()))
+                return nil, fmt.Errorf("failed to read file: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">zlog.Emit(SchemaFileLoaded, "Schema file loaded",
+                zlog.String("path", path),
+                zlog.Int("size_bytes", len(data)))
+
+        var schema Schema
+        ext := strings.ToLower(filepath.Ext(path))
+
+        switch ext </span>{
+        case ".json":<span class="cov8" title="1">
+                if err := json.Unmarshal(data, &amp;schema); err != nil </span><span class="cov8" title="1">{
+                        zlog.Emit(SchemaParseFailed, "Failed to parse JSON schema",
+                                zlog.String("path", path),
+                                zlog.String("error", err.Error()))
+                        return nil, fmt.Errorf("failed to parse JSON: %w", err)
+                }</span>
+                <span class="cov8" title="1">logFields := []zlog.Field{zlog.String("path", path)}
+                if schema.Version != "" </span><span class="cov8" title="1">{
+                        logFields = append(logFields, zlog.String("version", schema.Version))
+                }</span>
+                <span class="cov8" title="1">zlog.Emit(SchemaJSONParsed, "JSON schema parsed", logFields...)</span>
+        case ".yaml", ".yml":<span class="cov8" title="1">
+                if err := yaml.Unmarshal(data, &amp;schema); err != nil </span><span class="cov8" title="1">{
+                        zlog.Emit(SchemaParseFailed, "Failed to parse YAML schema",
+                                zlog.String("path", path),
+                                zlog.String("error", err.Error()))
+                        return nil, fmt.Errorf("failed to parse YAML: %w", err)
+                }</span>
+                <span class="cov8" title="1">logFields := []zlog.Field{zlog.String("path", path)}
+                if schema.Version != "" </span><span class="cov8" title="1">{
+                        logFields = append(logFields, zlog.String("version", schema.Version))
+                }</span>
+                <span class="cov8" title="1">zlog.Emit(SchemaYAMLParsed, "YAML schema parsed", logFields...)</span>
+        default:<span class="cov8" title="1">
+                return nil, fmt.Errorf("unsupported file format: %s", ext)</span>
+        }
+
+        <span class="cov8" title="1">return f.Build(schema)</span>
+}
+
+// BuildFromJSON creates a pipeline from a JSON string.
+func (f *Factory[T]) BuildFromJSON(jsonStr string) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        var schema Schema
+        if err := json.Unmarshal([]byte(jsonStr), &amp;schema); err != nil </span><span class="cov8" title="1">{
+                zlog.Emit(SchemaParseFailed, "Failed to parse JSON string",
+                        zlog.String("error", err.Error()))
+                return nil, fmt.Errorf("failed to parse JSON: %w", err)
+        }</span>
+        <span class="cov8" title="1">logFields := []zlog.Field{}
+        if schema.Version != "" </span><span class="cov8" title="1">{
+                logFields = append(logFields, zlog.String("version", schema.Version))
+        }</span>
+        <span class="cov8" title="1">zlog.Emit(SchemaJSONParsed, "JSON string parsed", logFields...)
+        return f.Build(schema)</span>
+}
+
+// BuildFromYAML creates a pipeline from a YAML string.
+func (f *Factory[T]) BuildFromYAML(yamlStr string) (pipz.Chainable[T], error) <span class="cov8" title="1">{
+        var schema Schema
+        if err := yaml.Unmarshal([]byte(yamlStr), &amp;schema); err != nil </span><span class="cov8" title="1">{
+                zlog.Emit(SchemaParseFailed, "Failed to parse YAML string",
+                        zlog.String("error", err.Error()))
+                return nil, fmt.Errorf("failed to parse YAML: %w", err)
+        }</span>
+        <span class="cov8" title="1">logFields := []zlog.Field{}
+        if schema.Version != "" </span><span class="cov8" title="1">{
+                logFields = append(logFields, zlog.String("version", schema.Version))
+        }</span>
+        <span class="cov8" title="1">zlog.Emit(SchemaYAMLParsed, "YAML string parsed", logFields...)
+        return f.Build(schema)</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package flume
+
+import (
+        "context"
+        "fmt"
+
+        "github.com/zoobzio/pipz"
+)
+
+// Stream represents a streaming pipeline that can accept individual items.
+// Streams are pre-built and registered with the factory, then referenced
+// by name in schemas as terminal nodes.
+type Stream[T any] interface {
+        // Name returns the unique identifier for this stream.
+        Name() string
+
+        // Send sends a single item into the stream.
+        // This method should handle channel writes and backpressure.
+        Send(ctx context.Context, item T) error
+}
+
+// StreamTerminator wraps a Stream as a pipz.Chainable, acting as a
+// terminal node that sends pipeline data into a streaming context.
+type StreamTerminator[T any] struct {
+        stream Stream[T]
+        name   pipz.Name
+}
+
+// NewStreamTerminator creates a new terminator for the given stream.
+func NewStreamTerminator[T any](stream Stream[T]) *StreamTerminator[T] <span class="cov8" title="1">{
+        return &amp;StreamTerminator[T]{
+                stream: stream,
+                name:   fmt.Sprintf("stream:%s", stream.Name()),
+        }
+}</span>
+
+// Process sends the input to the stream and returns it unchanged.
+// This allows the terminator to be used in contexts that expect a return value.
+func (s *StreamTerminator[T]) Process(ctx context.Context, input T) (T, error) <span class="cov8" title="1">{
+        if err := s.stream.Send(ctx, input); err != nil </span><span class="cov8" title="1">{
+                return input, fmt.Errorf("failed to send to stream %s: %w", s.stream.Name(), err)
+        }</span>
+        <span class="cov8" title="1">return input, nil</span>
+}
+
+// Name returns the name of this terminator.
+func (s *StreamTerminator[T]) Name() pipz.Name <span class="cov8" title="1">{
+        return s.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package flume
+
+import (
+        "fmt"
+        "strings"
+        "time"
+
+        "github.com/zoobzio/pipz"
+        "github.com/zoobzio/zlog"
+)
+
+// ValidationError represents a schema validation error with detailed context.
+type ValidationError struct { //nolint:govet
+        Path    []string // Path to the error in the schema tree
+        Message string   // Error message
+}
+
+func (e ValidationError) Error() string <span class="cov8" title="1">{
+        if len(e.Path) == 0 </span><span class="cov0" title="0">{
+                return e.Message
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("%s: %s", strings.Join(e.Path, "."), e.Message)</span>
+}
+
+// ValidationErrors collects multiple validation errors.
+type ValidationErrors []ValidationError
+
+func (e ValidationErrors) Error() string <span class="cov8" title="1">{
+        if len(e) == 0 </span><span class="cov0" title="0">{
+                return "no validation errors"
+        }</span>
+        <span class="cov8" title="1">if len(e) == 1 </span><span class="cov8" title="1">{
+                return e[0].Error()
+        }</span>
+
+        <span class="cov8" title="1">var sb strings.Builder
+        sb.WriteString(fmt.Sprintf("%d validation errors:\n", len(e)))
+        for i, err := range e </span><span class="cov8" title="1">{
+                sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, err.Error()))
+        }</span>
+        <span class="cov8" title="1">return sb.String()</span>
+}
+
+// ValidateSchema validates a schema without building it.
+// Returns nil if valid, or ValidationErrors containing all issues found.
+func (f *Factory[T]) ValidateSchema(schema Schema) error <span class="cov8" title="1">{
+        start := time.Now()
+        zlog.Emit(SchemaValidationStarted, "Schema validation started")
+
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+
+        var errors ValidationErrors
+        f.validateNode(&amp;schema.Node, []string{"root"}, &amp;errors)
+
+        if len(errors) == 0 </span><span class="cov8" title="1">{
+                zlog.Emit(SchemaValidationCompleted, "Schema validation completed",
+                        zlog.Duration("duration", time.Since(start)))
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">zlog.Emit(SchemaValidationFailed, "Schema validation failed",
+                zlog.Int("error_count", len(errors)),
+                zlog.Duration("duration", time.Since(start)))
+        return errors</span>
+}
+
+// validateNode recursively validates a node and its children.
+func (f *Factory[T]) validateNode(node *Node, path []string, errors *ValidationErrors) <span class="cov8" title="1">{
+        f.validateNodeWithVisited(node, path, errors, make(map[string]bool))
+}</span>
+
+// validateNodeWithVisited recursively validates a node with cycle detection.
+func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        // Check for empty node
+        if node.Ref == "" &amp;&amp; node.Type == "" &amp;&amp; node.Stream == "" </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "empty node - must have either ref, type, or stream",
+                })
+                return
+        }</span>
+
+        // Check for conflicting ref and type
+        <span class="cov8" title="1">if node.Ref != "" &amp;&amp; node.Type != "" </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "node cannot have both 'ref' and 'type'",
+                })
+                return
+        }</span>
+
+        // Handle stream nodes first
+        <span class="cov8" title="1">if node.Stream != "" </span><span class="cov8" title="1">{
+                f.validateStream(node, path, errors, visitedRefs)
+                return
+        }</span>
+
+        // Validate processor reference
+        <span class="cov8" title="1">if node.Ref != "" </span><span class="cov8" title="1">{
+                // Check for cycles
+                if visitedRefs[node.Ref] </span><span class="cov8" title="1">{
+                        *errors = append(*errors, ValidationError{
+                                Path:    path,
+                                Message: fmt.Sprintf("circular reference detected: '%s' creates a cycle", node.Ref),
+                        })
+                        return
+                }</span>
+
+                <span class="cov8" title="1">if _, exists := f.processors[pipz.Name(node.Ref)]; !exists </span><span class="cov8" title="1">{ //nolint:unconvert
+                        *errors = append(*errors, ValidationError{
+                                Path:    path,
+                                Message: fmt.Sprintf("processor '%s' not found", node.Ref),
+                        })
+                }</span>
+
+                // Mark this ref as visited for cycle detection
+                <span class="cov8" title="1">visitedRefs[node.Ref] = true
+                return</span> // No more validation needed for refs
+        }
+
+        // Validate connector type
+        <span class="cov8" title="1">switch node.Type </span>{
+        case "sequence":<span class="cov8" title="1">
+                f.validateSequence(node, path, errors, visitedRefs)</span>
+        case "parallel", "concurrent":<span class="cov8" title="1">
+                f.validateConcurrent(node, path, errors, visitedRefs)</span>
+        case "race":<span class="cov8" title="1">
+                f.validateRace(node, path, errors, visitedRefs)</span>
+        case "fallback":<span class="cov8" title="1">
+                f.validateFallback(node, path, errors, visitedRefs)</span>
+        case "retry":<span class="cov8" title="1">
+                f.validateRetry(node, path, errors, visitedRefs)</span>
+        case "timeout":<span class="cov8" title="1">
+                f.validateTimeout(node, path, errors, visitedRefs)</span>
+        case "filter":<span class="cov8" title="1">
+                f.validateFilter(node, path, errors, visitedRefs)</span>
+        case "switch":<span class="cov8" title="1">
+                f.validateSwitch(node, path, errors, visitedRefs)</span>
+        case "circuit-breaker":<span class="cov8" title="1">
+                f.validateCircuitBreaker(node, path, errors, visitedRefs)</span>
+        case "rate-limit":<span class="cov8" title="1">
+                f.validateRateLimit(node, path, errors, visitedRefs)</span>
+        default:<span class="cov8" title="1">
+                // Check if it's a stream reference
+                if node.Stream != "" </span><span class="cov0" title="0">{
+                        f.validateStream(node, path, errors, visitedRefs)
+                }</span> else<span class="cov8" title="1"> {
+                        *errors = append(*errors, ValidationError{
+                                Path:    path,
+                                Message: fmt.Sprintf("unknown node type: %s", node.Type),
+                        })
+                }</span>
+        }
+}
+
+// validateSequence validates a sequence node.
+func (f *Factory[T]) validateSequence(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if len(node.Children) == 0 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "sequence requires at least one child",
+                })
+                return
+        }</span>
+
+        // Validate each child
+        <span class="cov8" title="1">for i := range node.Children </span><span class="cov8" title="1">{
+                childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+                f.validateNodeWithVisited(&amp;node.Children[i], childPath, errors, visitedRefs)
+        }</span>
+}
+
+// validateConcurrent validates a concurrent/parallel node.
+func (f *Factory[T]) validateConcurrent(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if len(node.Children) == 0 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "concurrent requires at least one child",
+                })
+                return
+        }</span>
+
+        // Validate each child
+        <span class="cov8" title="1">for i := range node.Children </span><span class="cov8" title="1">{
+                childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+                f.validateNodeWithVisited(&amp;node.Children[i], childPath, errors, visitedRefs)
+        }</span>
+}
+
+// validateRace validates a race node.
+func (f *Factory[T]) validateRace(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if len(node.Children) == 0 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "race requires at least one child",
+                })
+                return
+        }</span>
+
+        // Validate each child
+        <span class="cov8" title="1">for i := range node.Children </span><span class="cov8" title="1">{
+                childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+                f.validateNodeWithVisited(&amp;node.Children[i], childPath, errors, visitedRefs)
+        }</span>
+}
+
+// validateFallback validates a fallback node.
+func (f *Factory[T]) validateFallback(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if len(node.Children) != 2 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "fallback requires exactly 2 children",
+                })
+                return
+        }</span>
+
+        // Validate primary
+        <span class="cov8" title="1">primaryPath := append(append([]string(nil), path...), "children[0](primary)")
+        primaryCopy := node.Children[0]
+        f.validateNodeWithVisited(&amp;primaryCopy, primaryPath, errors, visitedRefs)
+
+        // Validate fallback
+        if len(node.Children) &gt; 1 </span><span class="cov8" title="1">{
+                fallbackPath := append(append([]string(nil), path...), "children[1](fallback)")
+                fallbackCopy := node.Children[1]
+                f.validateNodeWithVisited(&amp;fallbackCopy, fallbackPath, errors, visitedRefs)
+        }</span>
+}
+
+// validateRetry validates a retry node.
+func (f *Factory[T]) validateRetry(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "retry requires a child",
+                })
+                return
+        }</span>
+
+        // Validate attempts (0 means default, negative is error)
+        <span class="cov8" title="1">if node.Attempts &lt; 0 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    append(append([]string(nil), path...), "attempts"),
+                        Message: "attempts must be positive",
+                })
+        }</span>
+
+        // Validate backoff duration if specified
+        <span class="cov8" title="1">if node.Backoff != "" </span><span class="cov8" title="1">{
+                if _, err := time.ParseDuration(node.Backoff); err != nil </span><span class="cov8" title="1">{
+                        *errors = append(*errors, ValidationError{
+                                Path:    append(append([]string(nil), path...), "backoff"),
+                                Message: fmt.Sprintf("invalid backoff duration: %s", err),
+                        })
+                }</span>
+        }
+
+        // Validate child
+        <span class="cov8" title="1">childPath := append(append([]string(nil), path...), "child")
+        f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)</span>
+}
+
+// validateTimeout validates a timeout node.
+func (f *Factory[T]) validateTimeout(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "timeout requires a child",
+                })
+                return
+        }</span>
+
+        // Validate duration if specified
+        <span class="cov8" title="1">if node.Duration != "" </span><span class="cov8" title="1">{
+                if _, err := time.ParseDuration(node.Duration); err != nil </span><span class="cov8" title="1">{
+                        *errors = append(*errors, ValidationError{
+                                Path:    append(append([]string(nil), path...), "duration"),
+                                Message: fmt.Sprintf("invalid duration: %s", err),
+                        })
+                }</span>
+        }
+
+        // Validate child
+        <span class="cov8" title="1">childPath := append(append([]string(nil), path...), "child")
+        f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)</span>
+}
+
+// validateFilter validates a filter node.
+func (f *Factory[T]) validateFilter(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        // Check predicate
+        if node.Predicate == "" </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "filter requires a predicate",
+                })
+        }</span> else<span class="cov8" title="1"> if _, exists := f.predicates[pipz.Name(node.Predicate)]; !exists </span><span class="cov8" title="1">{ //nolint:unconvert
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: fmt.Sprintf("predicate '%s' not found", node.Predicate),
+                })
+        }</span>
+
+        // Check then branch
+        <span class="cov8" title="1">if node.Then == nil </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "filter requires a 'then' branch",
+                })
+        }</span> else<span class="cov8" title="1"> {
+                thenPath := append(append([]string(nil), path...), "then")
+                f.validateNodeWithVisited(node.Then, thenPath, errors, visitedRefs)
+        }</span>
+
+        // Validate optional else branch
+        <span class="cov8" title="1">if node.Else != nil </span><span class="cov8" title="1">{
+                elsePath := append(append([]string(nil), path...), "else")
+                f.validateNodeWithVisited(node.Else, elsePath, errors, visitedRefs)
+        }</span>
+}
+
+// validateSwitch validates a switch node.
+func (f *Factory[T]) validateSwitch(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        // Check condition
+        if node.Condition == "" </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "switch requires a condition",
+                })
+        }</span> else<span class="cov8" title="1"> if _, exists := f.conditions[pipz.Name(node.Condition)]; !exists </span><span class="cov8" title="1">{ //nolint:unconvert
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: fmt.Sprintf("condition '%s' not found", node.Condition),
+                })
+        }</span>
+
+        // Check routes
+        <span class="cov8" title="1">if len(node.Routes) == 0 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "switch requires at least one route",
+                })
+        }</span> else<span class="cov8" title="1"> {
+                // Validate each route
+                for key := range node.Routes </span><span class="cov8" title="1">{
+                        routePath := append(append([]string(nil), path...), fmt.Sprintf("routes.%s", key))
+                        route := node.Routes[key]
+                        f.validateNodeWithVisited(&amp;route, routePath, errors, visitedRefs)
+                }</span>
+        }
+
+        // Validate optional default
+        <span class="cov8" title="1">if node.Default != nil </span><span class="cov8" title="1">{
+                defaultPath := append(append([]string(nil), path...), "default")
+                f.validateNodeWithVisited(node.Default, defaultPath, errors, visitedRefs)
+        }</span>
+}
+
+// validateCircuitBreaker validates a circuit breaker node.
+func (f *Factory[T]) validateCircuitBreaker(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "circuit-breaker requires a child",
+                })
+                return
+        }</span>
+
+        // Validate recovery timeout if specified
+        <span class="cov8" title="1">if node.RecoveryTimeout != "" </span><span class="cov8" title="1">{
+                if _, err := time.ParseDuration(node.RecoveryTimeout); err != nil </span><span class="cov8" title="1">{
+                        *errors = append(*errors, ValidationError{
+                                Path:    path,
+                                Message: fmt.Sprintf("invalid recovery timeout: %v", err),
+                        })
+                }</span>
+        }
+
+        // Validate child
+        <span class="cov8" title="1">childPath := append(append([]string(nil), path...), "child")
+        f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)</span>
+}
+
+// validateRateLimit validates a rate limiter node.
+func (f *Factory[T]) validateRateLimit(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) <span class="cov8" title="1">{
+        if node.Child == nil </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "rate-limit requires a child",
+                })
+                return
+        }</span>
+
+        // Validate requests per second if specified
+        <span class="cov8" title="1">if node.RequestsPerSecond &lt; 0 </span><span class="cov0" title="0">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "requests_per_second must be non-negative",
+                })
+        }</span>
+
+        // Validate burst size if specified
+        <span class="cov8" title="1">if node.BurstSize &lt; 0 </span><span class="cov0" title="0">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "burst_size must be non-negative",
+                })
+        }</span>
+
+        // Validate child
+        <span class="cov8" title="1">childPath := append(append([]string(nil), path...), "child")
+        f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)</span>
+}
+
+// validateStream validates a stream node.
+func (f *Factory[T]) validateStream(node *Node, path []string, errors *ValidationErrors, _ map[string]bool) <span class="cov8" title="1">{
+        // Validate stream name
+        if node.Stream == "" </span><span class="cov0" title="0">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "stream node requires a stream name",
+                })
+                return
+        }</span>
+
+        // Check if stream is registered
+        <span class="cov8" title="1">if !f.HasStream(node.Stream) </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: fmt.Sprintf("stream '%s' not found", node.Stream),
+                })
+        }</span>
+
+        // Stream is terminal - cannot have children
+        <span class="cov8" title="1">if node.Child != nil </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "stream is a terminal node and cannot have a child",
+                })
+        }</span>
+
+        <span class="cov8" title="1">if len(node.Children) &gt; 0 </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "stream is a terminal node and cannot have children",
+                })
+        }</span>
+
+        // Should not have both stream and other fields
+        <span class="cov8" title="1">if node.Type != "" || node.Ref != "" </span><span class="cov8" title="1">{
+                *errors = append(*errors, ValidationError{
+                        Path:    path,
+                        Message: "stream node should not have type or ref fields",
+                })
+        }</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

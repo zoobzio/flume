@@ -350,3 +350,54 @@ func (f *Factory[T]) buildRateLimit(node *Node) (pipz.Chainable[T], error) {
 	sequence := pipz.NewSequence(name, rateLimiter, child)
 	return sequence, nil
 }
+
+// buildStream creates a stream effect from schema that can optionally continue processing.
+func (f *Factory[T]) buildStream(node *Node) (pipz.Chainable[T], error) {
+	if node.Stream == "" {
+		return nil, fmt.Errorf("stream node requires a stream name")
+	}
+
+	channel, exists := f.channels[node.Stream]
+	if !exists {
+		return nil, fmt.Errorf("channel not found: %s", node.Stream)
+	}
+
+	// Create the effect that pushes to channel
+	streamEffect := pipz.Effect(fmt.Sprintf("stream:%s", node.Stream), func(_ context.Context, item T) error {
+		channel <- item
+		return nil
+	})
+
+	// If there are no children, just return the effect
+	if node.Child == nil && len(node.Children) == 0 {
+		return streamEffect, nil
+	}
+
+	// If there are children, create a sequence starting with the stream effect
+	children := []pipz.Chainable[T]{streamEffect}
+
+	// Add single child if present
+	if node.Child != nil {
+		child, err := f.buildNode(node.Child)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build child: %w", err)
+		}
+		children = append(children, child)
+	}
+
+	// Add multiple children if present
+	for i := range node.Children {
+		child, err := f.buildNode(&node.Children[i])
+		if err != nil {
+			return nil, fmt.Errorf("failed to build child %d: %w", i, err)
+		}
+		children = append(children, child)
+	}
+
+	name := node.Name
+	if name == "" {
+		name = fmt.Sprintf("stream:%s", node.Stream)
+	}
+
+	return pipz.NewSequence(name, children...), nil
+}

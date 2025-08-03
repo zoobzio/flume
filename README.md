@@ -291,6 +291,136 @@ Validation checks:
 - Connector constraints (e.g., fallback needs exactly 2 children)
 - Configuration values are valid (e.g., positive retry attempts)
 
+## Channel Integration
+
+Flume provides seamless integration with Go channels, allowing pipelines to terminate by sending data to registered channels. This enables easy integration with streaming systems like [streamz](https://github.com/zoobzio/streamz):
+
+### Basic Channel Usage
+
+```go
+// Create a channel for your data type
+outputChannel := make(chan MyData, 100)
+
+// Register with flume factory
+factory.AddChannel("output-stream", outputChannel)
+
+// Set up your streaming processing (using any library)
+go func() {
+    for item := range outputChannel {
+        // Process items asynchronously
+        processStreamItem(item)
+    }
+}()
+
+// Use in schema as terminal node
+schema := `
+type: sequence
+children:
+  - ref: validate
+  - ref: enrich
+  - stream: output-stream  # Terminal - data flows to channel
+`
+
+pipeline, err := factory.BuildFromYAML(schema)
+```
+
+### Streamz Integration Example
+
+```go
+import "github.com/zoobzio/streamz"
+
+// Create input channel
+inputChannel := make(chan MyData, 100)
+
+// Register with flume
+factory.AddChannel("output-stream", inputChannel)
+
+// Set up streamz pipeline using the same channel
+go func() {
+    batcher := streamz.NewBatcher[MyData](streamz.BatchConfig{
+        MaxSize:    10,
+        MaxLatency: 100 * time.Millisecond,
+    })
+    
+    batched := batcher.Process(ctx, inputChannel)
+    
+    for batch := range batched {
+        // Process batches
+        saveBatchToDatabase(batch)
+    }
+}()
+
+// Flume pipeline sends individual items to channel
+// Streamz processes them as batches
+schema := `
+type: sequence
+children:
+  - ref: validate
+  - stream: output-stream
+`
+```
+
+### Channel Routing
+
+Channels work well with conditional routing:
+
+```go
+// Create and register multiple channels
+highPriorityChannel := make(chan MyData, 50)
+lowPriorityChannel := make(chan MyData, 200)
+errorChannel := make(chan MyData, 10)
+
+factory.AddChannel("high-priority", highPriorityChannel)
+factory.AddChannel("low-priority", lowPriorityChannel)  
+factory.AddChannel("error-stream", errorChannel)
+
+// Route to different channels based on conditions
+schema := `
+type: switch
+condition: priority-level
+routes:
+  high:
+    stream: high-priority
+  low:
+    stream: low-priority
+default:
+  stream: error-stream
+`
+
+// Set up different processing for each channel
+go processHighPriority(highPriorityChannel)
+go processLowPriority(lowPriorityChannel)
+go handleErrors(errorChannel)
+```
+
+### Stream Nodes with Continued Processing
+
+Stream nodes can have children, allowing pipelines to continue after sending to channels:
+
+```yaml
+# Pipeline continues after streaming
+type: sequence
+children:
+  - ref: validate
+  - stream: audit-stream    # Send to channel for auditing
+    child:
+      ref: process-further  # Continue pipeline
+  - ref: finalize
+```
+
+This pattern is useful for:
+- **Auditing**: Send copies to audit channels while continuing processing
+- **Monitoring**: Stream metrics while processing continues  
+- **Fan-out**: Send to multiple channels at different pipeline stages
+
+### Channel Characteristics
+
+- **Side effects**: Stream nodes perform side effects while allowing continued processing
+- **Fire-and-forget**: Pipeline sends to channel and optionally continues
+- **Backpressure**: Respects channel buffer limits (may block if full)
+- **Independent processing**: Channel consumers run independently of flume
+- **Zero dependencies**: No import of streaming libraries required
+
 ## Supported Connectors
 
 - **sequence**: Sequential processing
@@ -303,6 +433,7 @@ Validation checks:
 - **rate-limit**: Rate limiting for controlling request throughput
 - **filter**: Conditional execution based on predicates
 - **switch**: Multi-way routing based on conditions
+- **stream**: Channel integration with optional continued processing
 
 ## Design Philosophy
 

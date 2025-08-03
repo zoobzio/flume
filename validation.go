@@ -73,10 +73,10 @@ func (f *Factory[T]) validateNode(node *Node, path []string, errors *ValidationE
 // validateNodeWithVisited recursively validates a node with cycle detection.
 func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
 	// Check for empty node
-	if node.Ref == "" && node.Type == "" {
+	if node.Ref == "" && node.Type == "" && node.Stream == "" {
 		*errors = append(*errors, ValidationError{
 			Path:    path,
-			Message: "node must have either 'ref' or 'type'",
+			Message: "empty node - must have either ref, type, or stream",
 		})
 		return
 	}
@@ -87,6 +87,12 @@ func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *
 			Path:    path,
 			Message: "node cannot have both 'ref' and 'type'",
 		})
+		return
+	}
+
+	// Handle stream nodes first
+	if node.Stream != "" {
+		f.validateStream(node, path, errors, visitedRefs)
 		return
 	}
 
@@ -136,10 +142,15 @@ func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *
 	case "rate-limit":
 		f.validateRateLimit(node, path, errors, visitedRefs)
 	default:
-		*errors = append(*errors, ValidationError{
-			Path:    path,
-			Message: fmt.Sprintf("unknown node type: %s", node.Type),
-		})
+		// Check if it's a stream reference
+		if node.Stream != "" {
+			f.validateStream(node, path, errors, visitedRefs)
+		} else {
+			*errors = append(*errors, ValidationError{
+				Path:    path,
+				Message: fmt.Sprintf("unknown node type: %s", node.Type),
+			})
+		}
 	}
 }
 
@@ -399,4 +410,43 @@ func (f *Factory[T]) validateRateLimit(node *Node, path []string, errors *Valida
 	// Validate child
 	childPath := append(append([]string(nil), path...), "child")
 	f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)
+}
+
+// validateStream validates a stream node.
+func (f *Factory[T]) validateStream(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	// Validate stream name
+	if node.Stream == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "stream node requires a stream name",
+		})
+		return
+	}
+
+	// Check if channel is registered
+	if !f.HasChannel(node.Stream) {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: fmt.Sprintf("channel '%s' not found", node.Stream),
+		})
+	}
+
+	// Validate optional children
+	if node.Child != nil {
+		childPath := append(append([]string(nil), path...), "child")
+		f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)
+	}
+
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		f.validateNodeWithVisited(&node.Children[i], childPath, errors, visitedRefs)
+	}
+
+	// Should not have both stream and other fields
+	if node.Type != "" || node.Ref != "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "stream node should not have type or ref fields",
+		})
+	}
 }
