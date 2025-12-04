@@ -1,12 +1,13 @@
 package flume
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/pipz"
-	"github.com/zoobzio/zlog"
 )
 
 // ValidationError represents a schema validation error with detailed context.
@@ -45,7 +46,7 @@ func (e ValidationErrors) Error() string {
 // Returns nil if valid, or ValidationErrors containing all issues found.
 func (f *Factory[T]) ValidateSchema(schema Schema) error {
 	start := time.Now()
-	zlog.Emit(SchemaValidationStarted, "Schema validation started")
+	capitan.Emit(context.Background(), SchemaValidationStarted)
 
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -54,20 +55,31 @@ func (f *Factory[T]) ValidateSchema(schema Schema) error {
 	f.validateNode(&schema.Node, []string{"root"}, &errors)
 
 	if len(errors) == 0 {
-		zlog.Emit(SchemaValidationCompleted, "Schema validation completed",
-			zlog.Duration("duration", time.Since(start)))
+		capitan.Emit(context.Background(), SchemaValidationCompleted,
+			KeyDuration.Field(time.Since(start)))
 		return nil
 	}
 
-	zlog.Emit(SchemaValidationFailed, "Schema validation failed",
-		zlog.Int("error_count", len(errors)),
-		zlog.Duration("duration", time.Since(start)))
+	capitan.Emit(context.Background(), SchemaValidationFailed,
+		KeyErrorCount.Field(len(errors)),
+		KeyDuration.Field(time.Since(start)))
 	return errors
 }
 
 // validateNode recursively validates a node and its children.
 func (f *Factory[T]) validateNode(node *Node, path []string, errors *ValidationErrors) {
 	f.validateNodeWithVisited(node, path, errors, make(map[string]bool))
+}
+
+// copyVisitedRefs creates a shallow copy of the visited refs map.
+// Used for mutually exclusive branches (switch routes, filter then/else, fallback)
+// where the same processor can validly appear in multiple branches.
+func copyVisitedRefs(visited map[string]bool) map[string]bool {
+	result := make(map[string]bool, len(visited))
+	for k, v := range visited {
+		result[k] = v
+	}
+	return result
 }
 
 // validateNodeWithVisited recursively validates a node with cycle detection.
@@ -123,7 +135,7 @@ func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *
 	switch node.Type {
 	case "sequence":
 		f.validateSequence(node, path, errors, visitedRefs)
-	case "parallel", "concurrent":
+	case "concurrent":
 		f.validateConcurrent(node, path, errors, visitedRefs)
 	case "race":
 		f.validateRace(node, path, errors, visitedRefs)
@@ -141,16 +153,19 @@ func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *
 		f.validateCircuitBreaker(node, path, errors, visitedRefs)
 	case "rate-limit":
 		f.validateRateLimit(node, path, errors, visitedRefs)
+	case "contest":
+		f.validateContest(node, path, errors, visitedRefs)
+	case "handle":
+		f.validateHandle(node, path, errors, visitedRefs)
+	case "scaffold":
+		f.validateScaffold(node, path, errors, visitedRefs)
+	case "worker-pool":
+		f.validateWorkerPool(node, path, errors, visitedRefs)
 	default:
-		// Check if it's a stream reference
-		if node.Stream != "" {
-			f.validateStream(node, path, errors, visitedRefs)
-		} else {
-			*errors = append(*errors, ValidationError{
-				Path:    path,
-				Message: fmt.Sprintf("unknown node type: %s", node.Type),
-			})
-		}
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: fmt.Sprintf("unknown node type '%s'", node.Type),
+		})
 	}
 }
 
@@ -171,7 +186,7 @@ func (f *Factory[T]) validateSequence(node *Node, path []string, errors *Validat
 	}
 }
 
-// validateConcurrent validates a concurrent/parallel node.
+// validateConcurrent validates a concurrent node.
 func (f *Factory[T]) validateConcurrent(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
 	if len(node.Children) == 0 {
 		*errors = append(*errors, ValidationError{
@@ -179,6 +194,16 @@ func (f *Factory[T]) validateConcurrent(node *Node, path []string, errors *Valid
 			Message: "concurrent requires at least one child",
 		})
 		return
+	}
+
+	// Validate reducer if specified
+	if node.Reducer != "" {
+		if _, exists := f.reducers[pipz.Name(node.Reducer)]; !exists { //nolint:unconvert
+			*errors = append(*errors, ValidationError{
+				Path:    path,
+				Message: fmt.Sprintf("reducer '%s' not found", node.Reducer),
+			})
+		}
 	}
 
 	// Validate each child
@@ -215,16 +240,20 @@ func (f *Factory[T]) validateFallback(node *Node, path []string, errors *Validat
 		return
 	}
 
-	// Validate primary
+	// Validate primary with its own visited set copy.
+	// Primary and fallback are mutually exclusive branches
+	// (fallback only runs if primary fails).
 	primaryPath := append(append([]string(nil), path...), "children[0](primary)")
 	primaryCopy := node.Children[0]
-	f.validateNodeWithVisited(&primaryCopy, primaryPath, errors, visitedRefs)
+	primaryVisited := copyVisitedRefs(visitedRefs)
+	f.validateNodeWithVisited(&primaryCopy, primaryPath, errors, primaryVisited)
 
-	// Validate fallback
+	// Validate fallback with its own visited set copy
 	if len(node.Children) > 1 {
 		fallbackPath := append(append([]string(nil), path...), "children[1](fallback)")
 		fallbackCopy := node.Children[1]
-		f.validateNodeWithVisited(&fallbackCopy, fallbackPath, errors, visitedRefs)
+		fallbackVisited := copyVisitedRefs(visitedRefs)
+		f.validateNodeWithVisited(&fallbackCopy, fallbackPath, errors, fallbackVisited)
 	}
 }
 
@@ -301,7 +330,8 @@ func (f *Factory[T]) validateFilter(node *Node, path []string, errors *Validatio
 		})
 	}
 
-	// Check then branch
+	// Check then branch with its own visited set copy.
+	// Then and else are mutually exclusive branches.
 	if node.Then == nil {
 		*errors = append(*errors, ValidationError{
 			Path:    path,
@@ -309,13 +339,15 @@ func (f *Factory[T]) validateFilter(node *Node, path []string, errors *Validatio
 		})
 	} else {
 		thenPath := append(append([]string(nil), path...), "then")
-		f.validateNodeWithVisited(node.Then, thenPath, errors, visitedRefs)
+		thenVisited := copyVisitedRefs(visitedRefs)
+		f.validateNodeWithVisited(node.Then, thenPath, errors, thenVisited)
 	}
 
-	// Validate optional else branch
+	// Validate optional else branch with its own visited set copy
 	if node.Else != nil {
 		elsePath := append(append([]string(nil), path...), "else")
-		f.validateNodeWithVisited(node.Else, elsePath, errors, visitedRefs)
+		elseVisited := copyVisitedRefs(visitedRefs)
+		f.validateNodeWithVisited(node.Else, elsePath, errors, elseVisited)
 	}
 }
 
@@ -341,18 +373,22 @@ func (f *Factory[T]) validateSwitch(node *Node, path []string, errors *Validatio
 			Message: "switch requires at least one route",
 		})
 	} else {
-		// Validate each route
+		// Validate each route with its own visited set copy.
+		// Routes are mutually exclusive branches, so the same processor
+		// can validly appear in multiple routes without being a cycle.
 		for key := range node.Routes {
 			routePath := append(append([]string(nil), path...), fmt.Sprintf("routes.%s", key))
 			route := node.Routes[key]
-			f.validateNodeWithVisited(&route, routePath, errors, visitedRefs)
+			routeVisited := copyVisitedRefs(visitedRefs)
+			f.validateNodeWithVisited(&route, routePath, errors, routeVisited)
 		}
 	}
 
-	// Validate optional default
+	// Validate optional default with its own visited set copy
 	if node.Default != nil {
 		defaultPath := append(append([]string(nil), path...), "default")
-		f.validateNodeWithVisited(node.Default, defaultPath, errors, visitedRefs)
+		defaultVisited := copyVisitedRefs(visitedRefs)
+		f.validateNodeWithVisited(node.Default, defaultPath, errors, defaultVisited)
 	}
 }
 
@@ -371,7 +407,7 @@ func (f *Factory[T]) validateCircuitBreaker(node *Node, path []string, errors *V
 		if _, err := time.ParseDuration(node.RecoveryTimeout); err != nil {
 			*errors = append(*errors, ValidationError{
 				Path:    path,
-				Message: fmt.Sprintf("invalid recovery timeout: %v", err),
+				Message: fmt.Sprintf("invalid recovery timeout: %s", err),
 			})
 		}
 	}
@@ -431,6 +467,24 @@ func (f *Factory[T]) validateStream(node *Node, path []string, errors *Validatio
 		})
 	}
 
+	// Validate stream timeout if specified
+	if node.StreamTimeout != "" {
+		if _, err := time.ParseDuration(node.StreamTimeout); err != nil {
+			*errors = append(*errors, ValidationError{
+				Path:    append(append([]string(nil), path...), "stream_timeout"),
+				Message: fmt.Sprintf("invalid stream_timeout: %s", err),
+			})
+		}
+	}
+
+	// Warn if both child and children are specified (ambiguous)
+	if node.Child != nil && len(node.Children) > 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "stream node has both 'child' and 'children' specified; prefer using only one",
+		})
+	}
+
 	// Validate optional children
 	if node.Child != nil {
 		childPath := append(append([]string(nil), path...), "child")
@@ -448,5 +502,107 @@ func (f *Factory[T]) validateStream(node *Node, path []string, errors *Validatio
 			Path:    path,
 			Message: "stream node should not have type or ref fields",
 		})
+	}
+}
+
+// validateContest validates a contest node.
+func (f *Factory[T]) validateContest(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	// Check predicate
+	if node.Predicate == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "contest requires a predicate",
+		})
+	} else if _, exists := f.predicates[pipz.Name(node.Predicate)]; !exists { //nolint:unconvert
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: fmt.Sprintf("predicate '%s' not found", node.Predicate),
+		})
+	}
+
+	// Check children
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "contest requires at least one child",
+		})
+		return
+	}
+
+	// Validate each child with its own visited set copy (mutually exclusive branches)
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		childVisited := copyVisitedRefs(visitedRefs)
+		f.validateNodeWithVisited(&node.Children[i], childPath, errors, childVisited)
+	}
+}
+
+// validateHandle validates a handle node.
+func (f *Factory[T]) validateHandle(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "handle requires a child",
+		})
+		return
+	}
+
+	// Check error handler
+	if node.ErrorHandler == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "handle requires an error_handler",
+		})
+	} else if _, exists := f.errorHandlers[pipz.Name(node.ErrorHandler)]; !exists { //nolint:unconvert
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: fmt.Sprintf("error handler '%s' not found", node.ErrorHandler),
+		})
+	}
+
+	// Validate child
+	childPath := append(append([]string(nil), path...), "child")
+	f.validateNodeWithVisited(node.Child, childPath, errors, visitedRefs)
+}
+
+// validateScaffold validates a scaffold node.
+func (f *Factory[T]) validateScaffold(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "scaffold requires at least one child",
+		})
+		return
+	}
+
+	// Validate each child
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		f.validateNodeWithVisited(&node.Children[i], childPath, errors, visitedRefs)
+	}
+}
+
+// validateWorkerPool validates a worker pool node.
+func (f *Factory[T]) validateWorkerPool(node *Node, path []string, errors *ValidationErrors, visitedRefs map[string]bool) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "worker-pool requires at least one child",
+		})
+		return
+	}
+
+	// Validate workers count if specified
+	if node.Workers < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    append(append([]string(nil), path...), "workers"),
+			Message: "workers must be non-negative",
+		})
+	}
+
+	// Validate each child
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		f.validateNodeWithVisited(&node.Children[i], childPath, errors, visitedRefs)
 	}
 }

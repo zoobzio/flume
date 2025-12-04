@@ -1,46 +1,69 @@
 package flume
 
 import (
-	"github.com/zoobzio/zlog"
+	"github.com/zoobzio/capitan"
 )
 
 // Flume-specific signals for observability.
-const (
+var (
 	// Factory lifecycle events.
-	FactoryCreated      = zlog.Signal("FLUME_FACTORY_CREATED")
-	ProcessorRegistered = zlog.Signal("FLUME_PROCESSOR_REGISTERED")
-	PredicateRegistered = zlog.Signal("FLUME_PREDICATE_REGISTERED")
-	ConditionRegistered = zlog.Signal("FLUME_CONDITION_REGISTERED")
+	FactoryCreated         = capitan.NewSignal("flume.factory.created", "Flume factory created")
+	ProcessorRegistered    = capitan.NewSignal("flume.processor.registered", "Processor registered")
+	PredicateRegistered    = capitan.NewSignal("flume.predicate.registered", "Predicate registered")
+	ConditionRegistered    = capitan.NewSignal("flume.condition.registered", "Condition registered")
+	ReducerRegistered      = capitan.NewSignal("flume.reducer.registered", "Reducer registered")
+	ErrorHandlerRegistered = capitan.NewSignal("flume.errorhandler.registered", "Error handler registered")
 
 	// Schema operations.
-	SchemaValidationStarted   = zlog.Signal("FLUME_SCHEMA_VALIDATION_STARTED")
-	SchemaValidationCompleted = zlog.Signal("FLUME_SCHEMA_VALIDATION_COMPLETED")
-	SchemaValidationFailed    = zlog.Signal("FLUME_SCHEMA_VALIDATION_FAILED")
-	SchemaBuildStarted        = zlog.Signal("FLUME_SCHEMA_BUILD_STARTED")
-	SchemaBuildCompleted      = zlog.Signal("FLUME_SCHEMA_BUILD_COMPLETED")
-	SchemaBuildFailed         = zlog.Signal("FLUME_SCHEMA_BUILD_FAILED")
+	SchemaValidationStarted   = capitan.NewSignal("flume.schema.validation.started", "Schema validation started")
+	SchemaValidationCompleted = capitan.NewSignal("flume.schema.validation.completed", "Schema validation completed")
+	SchemaValidationFailed    = capitan.NewSignal("flume.schema.validation.failed", "Schema validation failed")
+	SchemaBuildStarted        = capitan.NewSignal("flume.schema.build.started", "Schema build started")
+	SchemaBuildCompleted      = capitan.NewSignal("flume.schema.build.completed", "Schema build completed")
+	SchemaBuildFailed         = capitan.NewSignal("flume.schema.build.failed", "Schema build failed")
 
 	// Dynamic schema management.
-	SchemaRegistered   = zlog.Signal("FLUME_SCHEMA_REGISTERED")
-	SchemaUpdated      = zlog.Signal("FLUME_SCHEMA_UPDATED")
-	SchemaUpdateFailed = zlog.Signal("FLUME_SCHEMA_UPDATE_FAILED")
-	SchemaRemoved      = zlog.Signal("FLUME_SCHEMA_REMOVED")
-	PipelineRetrieved  = zlog.Signal("FLUME_PIPELINE_RETRIEVED")
+	SchemaRegistered   = capitan.NewSignal("flume.schema.registered", "Schema registered")
+	SchemaUpdated      = capitan.NewSignal("flume.schema.updated", "Schema updated")
+	SchemaUpdateFailed = capitan.NewSignal("flume.schema.update.failed", "Schema update failed")
+	SchemaRemoved      = capitan.NewSignal("flume.schema.removed", "Schema removed")
+	PipelineRetrieved  = capitan.NewSignal("flume.pipeline.retrieved", "Pipeline retrieved")
+
+	// Channel operations.
+	ChannelRegistered = capitan.NewSignal("flume.channel.registered", "Channel registered")
+	ChannelRemoved    = capitan.NewSignal("flume.channel.removed", "Channel removed")
 
 	// Component removal.
-	ProcessorRemoved = zlog.Signal("FLUME_PROCESSOR_REMOVED")
-	PredicateRemoved = zlog.Signal("FLUME_PREDICATE_REMOVED")
-	ConditionRemoved = zlog.Signal("FLUME_CONDITION_REMOVED")
+	ProcessorRemoved    = capitan.NewSignal("flume.processor.removed", "Processor removed")
+	PredicateRemoved    = capitan.NewSignal("flume.predicate.removed", "Predicate removed")
+	ConditionRemoved    = capitan.NewSignal("flume.condition.removed", "Condition removed")
+	ReducerRemoved      = capitan.NewSignal("flume.reducer.removed", "Reducer removed")
+	ErrorHandlerRemoved = capitan.NewSignal("flume.errorhandler.removed", "Error handler removed")
 
 	// File operations.
-	SchemaFileLoaded  = zlog.Signal("FLUME_SCHEMA_FILE_LOADED")
-	SchemaFileFailed  = zlog.Signal("FLUME_SCHEMA_FILE_FAILED")
-	SchemaYAMLParsed  = zlog.Signal("FLUME_SCHEMA_YAML_PARSED")
-	SchemaJSONParsed  = zlog.Signal("FLUME_SCHEMA_JSON_PARSED")
-	SchemaParseFailed = zlog.Signal("FLUME_SCHEMA_PARSE_FAILED")
+	SchemaFileLoaded  = capitan.NewSignal("flume.schema.file.loaded", "Schema file loaded")
+	SchemaFileFailed  = capitan.NewSignal("flume.schema.file.failed", "Schema file failed")
+	SchemaYAMLParsed  = capitan.NewSignal("flume.schema.yaml.parsed", "YAML schema parsed")
+	SchemaJSONParsed  = capitan.NewSignal("flume.schema.json.parsed", "JSON schema parsed")
+	SchemaParseFailed = capitan.NewSignal("flume.schema.parse.failed", "Schema parse failed")
 
 	// Performance and metrics.
-	FactoryOperationDuration   = zlog.Signal("FLUME_FACTORY_OPERATION_DURATION")
-	PipelineExecutionStarted   = zlog.Signal("FLUME_PIPELINE_EXECUTION_STARTED")
-	PipelineExecutionCompleted = zlog.Signal("FLUME_PIPELINE_EXECUTION_COMPLETED")
+	FactoryOperationDuration   = capitan.NewSignal("flume.factory.operation.duration", "Factory operation duration")
+	PipelineExecutionStarted   = capitan.NewSignal("flume.pipeline.execution.started", "Pipeline execution started")
+	PipelineExecutionCompleted = capitan.NewSignal("flume.pipeline.execution.completed", "Pipeline execution completed")
+)
+
+// Field keys for event data.
+var (
+	KeyName       = capitan.NewStringKey("name")
+	KeyType       = capitan.NewStringKey("type")
+	KeyVersion    = capitan.NewStringKey("version")
+	KeyOldVersion = capitan.NewStringKey("old_version")
+	KeyNewVersion = capitan.NewStringKey("new_version")
+	KeyPath       = capitan.NewStringKey("path")
+	KeyError      = capitan.NewStringKey("error")
+	KeyDuration   = capitan.NewDurationKey("duration")
+	KeyErrorCount = capitan.NewIntKey("error_count")
+	KeySizeBytes  = capitan.NewIntKey("size_bytes")
+	KeyFound      = capitan.NewBoolKey("found")
 )

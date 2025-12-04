@@ -1,17 +1,18 @@
 package flume_test
 
 import (
+	"context"
 	"testing"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/flume"
-	"github.com/zoobzio/zlog"
 )
 
 func TestObservabilitySignals(t *testing.T) {
-	// Test that all signals are defined and can be used with zlog.Emit
+	// Test that all signals are defined and can be used with capitan.Emit
 	signals := []struct {
 		name   string
-		signal zlog.Signal
+		signal capitan.Signal
 	}{
 		// Factory lifecycle events
 		{"FactoryCreated", flume.FactoryCreated},
@@ -34,6 +35,10 @@ func TestObservabilitySignals(t *testing.T) {
 		{"SchemaRemoved", flume.SchemaRemoved},
 		{"PipelineRetrieved", flume.PipelineRetrieved},
 
+		// Channel operations
+		{"ChannelRegistered", flume.ChannelRegistered},
+		{"ChannelRemoved", flume.ChannelRemoved},
+
 		// Component removal
 		{"ProcessorRemoved", flume.ProcessorRemoved},
 		{"PredicateRemoved", flume.PredicateRemoved},
@@ -54,27 +59,32 @@ func TestObservabilitySignals(t *testing.T) {
 
 	for _, tt := range signals {
 		t.Run(tt.name, func(t *testing.T) {
-			// Verify the signal is not empty
-			if tt.signal == "" {
-				t.Errorf("Signal %s is empty", tt.name)
+			// Verify the signal has a name
+			if tt.signal.Name() == "" {
+				t.Errorf("Signal %s has empty name", tt.name)
 			}
 
 			// Verify the signal has the expected prefix
-			signalStr := string(tt.signal)
-			if len(signalStr) < 6 || signalStr[:6] != "FLUME_" {
-				t.Errorf("Signal %s does not have FLUME_ prefix: %s", tt.name, signalStr)
+			signalName := tt.signal.Name()
+			if len(signalName) < 6 || signalName[:6] != "flume." {
+				t.Errorf("Signal %s does not have flume. prefix: %s", tt.name, signalName)
 			}
 
-			// Test that the signal can be used with zlog.Emit
-			// This won't actually emit anything without a configured handler,
+			// Verify the signal has a description
+			if tt.signal.Description() == "" {
+				t.Errorf("Signal %s has empty description", tt.name)
+			}
+
+			// Test that the signal can be used with capitan.Emit
+			// This won't actually emit anything without a configured listener,
 			// but it verifies the types are compatible
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						t.Errorf("Signal %s caused panic when used with zlog.Emit: %v", tt.name, r)
+						t.Errorf("Signal %s caused panic when used with capitan.Emit: %v", tt.name, r)
 					}
 				}()
-				zlog.Emit(tt.signal, "Test message")
+				capitan.Emit(context.Background(), tt.signal)
 			}()
 		})
 	}
@@ -82,46 +92,67 @@ func TestObservabilitySignals(t *testing.T) {
 
 func TestSignalUniqueness(t *testing.T) {
 	// Verify all signals have unique values
-	signals := map[zlog.Signal]string{
-		flume.FactoryCreated:             "FactoryCreated",
-		flume.ProcessorRegistered:        "ProcessorRegistered",
-		flume.PredicateRegistered:        "PredicateRegistered",
-		flume.ConditionRegistered:        "ConditionRegistered",
-		flume.SchemaValidationStarted:    "SchemaValidationStarted",
-		flume.SchemaValidationCompleted:  "SchemaValidationCompleted",
-		flume.SchemaValidationFailed:     "SchemaValidationFailed",
-		flume.SchemaBuildStarted:         "SchemaBuildStarted",
-		flume.SchemaBuildCompleted:       "SchemaBuildCompleted",
-		flume.SchemaBuildFailed:          "SchemaBuildFailed",
-		flume.SchemaRegistered:           "SchemaRegistered",
-		flume.SchemaUpdated:              "SchemaUpdated",
-		flume.SchemaUpdateFailed:         "SchemaUpdateFailed",
-		flume.SchemaRemoved:              "SchemaRemoved",
-		flume.PipelineRetrieved:          "PipelineRetrieved",
-		flume.ProcessorRemoved:           "ProcessorRemoved",
-		flume.PredicateRemoved:           "PredicateRemoved",
-		flume.ConditionRemoved:           "ConditionRemoved",
-		flume.SchemaFileLoaded:           "SchemaFileLoaded",
-		flume.SchemaFileFailed:           "SchemaFileFailed",
-		flume.SchemaYAMLParsed:           "SchemaYAMLParsed",
-		flume.SchemaJSONParsed:           "SchemaJSONParsed",
-		flume.SchemaParseFailed:          "SchemaParseFailed",
-		flume.FactoryOperationDuration:   "FactoryOperationDuration",
-		flume.PipelineExecutionStarted:   "PipelineExecutionStarted",
-		flume.PipelineExecutionCompleted: "PipelineExecutionCompleted",
+	signals := map[string]string{
+		flume.FactoryCreated.Name():             "FactoryCreated",
+		flume.ProcessorRegistered.Name():        "ProcessorRegistered",
+		flume.PredicateRegistered.Name():        "PredicateRegistered",
+		flume.ConditionRegistered.Name():        "ConditionRegistered",
+		flume.SchemaValidationStarted.Name():    "SchemaValidationStarted",
+		flume.SchemaValidationCompleted.Name():  "SchemaValidationCompleted",
+		flume.SchemaValidationFailed.Name():     "SchemaValidationFailed",
+		flume.SchemaBuildStarted.Name():         "SchemaBuildStarted",
+		flume.SchemaBuildCompleted.Name():       "SchemaBuildCompleted",
+		flume.SchemaBuildFailed.Name():          "SchemaBuildFailed",
+		flume.SchemaRegistered.Name():           "SchemaRegistered",
+		flume.SchemaUpdated.Name():              "SchemaUpdated",
+		flume.SchemaUpdateFailed.Name():         "SchemaUpdateFailed",
+		flume.SchemaRemoved.Name():              "SchemaRemoved",
+		flume.PipelineRetrieved.Name():          "PipelineRetrieved",
+		flume.ChannelRegistered.Name():          "ChannelRegistered",
+		flume.ChannelRemoved.Name():             "ChannelRemoved",
+		flume.ProcessorRemoved.Name():           "ProcessorRemoved",
+		flume.PredicateRemoved.Name():           "PredicateRemoved",
+		flume.ConditionRemoved.Name():           "ConditionRemoved",
+		flume.SchemaFileLoaded.Name():           "SchemaFileLoaded",
+		flume.SchemaFileFailed.Name():           "SchemaFileFailed",
+		flume.SchemaYAMLParsed.Name():           "SchemaYAMLParsed",
+		flume.SchemaJSONParsed.Name():           "SchemaJSONParsed",
+		flume.SchemaParseFailed.Name():          "SchemaParseFailed",
+		flume.FactoryOperationDuration.Name():   "FactoryOperationDuration",
+		flume.PipelineExecutionStarted.Name():   "PipelineExecutionStarted",
+		flume.PipelineExecutionCompleted.Name(): "PipelineExecutionCompleted",
 	}
 
-	seen := make(map[zlog.Signal]string)
-	for signal, name := range signals {
-		if existingName, exists := seen[signal]; exists {
-			t.Errorf("Duplicate signal value: %s and %s both have value %s",
-				existingName, name, string(signal))
-		}
-		seen[signal] = name
+	// Verify we tested all signals (28 total)
+	if len(signals) != 28 {
+		t.Errorf("Expected 28 signals, got %d", len(signals))
+	}
+}
+
+func TestFieldKeys(t *testing.T) {
+	// Test that all field keys are defined
+	keys := []struct {
+		name string
+		key  capitan.Key
+	}{
+		{"KeyName", flume.KeyName},
+		{"KeyType", flume.KeyType},
+		{"KeyVersion", flume.KeyVersion},
+		{"KeyOldVersion", flume.KeyOldVersion},
+		{"KeyNewVersion", flume.KeyNewVersion},
+		{"KeyPath", flume.KeyPath},
+		{"KeyError", flume.KeyError},
+		{"KeyDuration", flume.KeyDuration},
+		{"KeyErrorCount", flume.KeyErrorCount},
+		{"KeySizeBytes", flume.KeySizeBytes},
+		{"KeyFound", flume.KeyFound},
 	}
 
-	// Verify we tested all signals (26 total)
-	if len(signals) != 26 {
-		t.Errorf("Expected 26 signals, got %d", len(signals))
+	for _, tt := range keys {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.key.Name() == "" {
+				t.Errorf("Key %s has empty name", tt.name)
+			}
+		})
 	}
 }

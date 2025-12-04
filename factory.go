@@ -10,9 +10,9 @@
 //   - Schema-driven pipeline construction (YAML/JSON)
 //   - Hot-reloading of pipeline definitions without restarts
 //   - Type-safe pipeline building through Go generics
-//   - Integration with streamz for terminal stream processing
+//   - Channel integration for terminal stream processing
 //   - Comprehensive validation with detailed error reporting
-//   - Support for all pipz connector types (sequence, parallel, retry, etc.)
+//   - Support for all pipz connector types (sequence, concurrent, retry, etc.)
 //
 // Basic usage:
 //
@@ -36,13 +36,13 @@
 //	pipeline, err := factory.BuildFromYAML(schema)
 //	result, err := pipeline.Process(ctx, data)
 //
-// Stream Integration:
+// Channel Integration:
 //
-// Flume integrates with streamz to support stream termination nodes.
-// Streams act as terminal endpoints for synchronous pipelines:
+// Flume supports channel integration for stream termination nodes.
+// Channels act as terminal endpoints for synchronous pipelines:
 //
-//	stream := streamz.NewFlumeStream("output", 100, myStreamPipeline)
-//	factory.AddStream("output", stream)
+//	ch := make(chan MyData, 100)
+//	factory.AddChannel("output", ch)
 //
 //	schema := `
 //	type: sequence
@@ -59,63 +59,143 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/pipz"
-	"github.com/zoobzio/zlog"
 )
 
 // Predicate combines a name with a predicate function for batch registration.
 type Predicate[T any] struct { //nolint:govet
-	Name      pipz.Name
-	Predicate func(context.Context, T) bool
+	Name        pipz.Name
+	Description string // Human-readable description of what this predicate checks
+	Predicate   func(context.Context, T) bool
 }
 
 // Condition combines a name with a condition function for batch registration.
 type Condition[T any] struct { //nolint:govet
-	Name      pipz.Name
-	Condition func(context.Context, T) string
+	Name        pipz.Name
+	Description string   // Human-readable description of what this condition evaluates
+	Values      []string // Possible return values (for schema generation/validation)
+	Condition   func(context.Context, T) string
+}
+
+// Reducer combines a name with a reducer function for concurrent result merging.
+type Reducer[T any] struct { //nolint:govet
+	Name        pipz.Name
+	Description string // Human-readable description of what this reducer does
+	Reducer     func(original T, results map[pipz.Name]T, errors map[pipz.Name]error) T
+}
+
+// ErrorHandler combines a name with an error handler processor.
+type ErrorHandler[T any] struct { //nolint:govet
+	Name        pipz.Name
+	Description string // Human-readable description of what this error handler does
+	Handler     pipz.Chainable[*pipz.Error[T]]
+}
+
+// ProcessorMeta wraps a processor with metadata for introspection.
+type ProcessorMeta[T any] struct { //nolint:govet
+	Processor   pipz.Chainable[T]
+	Description string   // Human-readable description of what this processor does
+	Tags        []string // Categorization tags for discovery
+}
+
+// predicateMeta stores a predicate function with its metadata.
+type predicateMeta[T any] struct { //nolint:govet
+	description string
+	predicate   func(context.Context, T) bool
+}
+
+// conditionMeta stores a condition function with its metadata.
+type conditionMeta[T any] struct { //nolint:govet
+	description string
+	values      []string
+	condition   func(context.Context, T) string
+}
+
+// reducerMeta stores a reducer function with its metadata.
+type reducerMeta[T any] struct {
+	reducer     func(original T, results map[pipz.Name]T, errors map[pipz.Name]error) T
+	description string
+}
+
+// errorHandlerMeta stores an error handler with its metadata.
+type errorHandlerMeta[T any] struct {
+	handler     pipz.Chainable[*pipz.Error[T]]
+	description string
+}
+
+// processorMeta stores a processor with its metadata.
+type processorMeta[T any] struct {
+	processor   pipz.Chainable[T]
+	description string
+	tags        []string
 }
 
 // Factory creates dynamic pipelines from schemas using registered components.
-// It maintains three registries: processors, predicates, and conditions.
+// It maintains registries for processors, predicates, conditions, reducers, and error handlers.
 // T must implement pipz.Cloner[T] to support parallel processing.
 type Factory[T pipz.Cloner[T]] struct {
-	processors map[pipz.Name]pipz.Chainable[T]
-	predicates map[pipz.Name]func(context.Context, T) bool
-	conditions map[pipz.Name]func(context.Context, T) string
-	schemas    map[string]*Schema
-	pipelines  map[string]*atomic.Pointer[pipz.Chainable[T]]
-	channels   map[string]chan<- T
-	mu         sync.RWMutex
+	processors    map[pipz.Name]processorMeta[T]
+	predicates    map[pipz.Name]predicateMeta[T]
+	conditions    map[pipz.Name]conditionMeta[T]
+	reducers      map[pipz.Name]reducerMeta[T]
+	errorHandlers map[pipz.Name]errorHandlerMeta[T]
+	schemas       map[string]*Schema
+	pipelines     map[string]*atomic.Pointer[pipz.Chainable[T]]
+	channels      map[string]chan<- T
+	mu            sync.RWMutex
 }
 
 // New creates a new Factory for type T.
 // T must implement pipz.Cloner[T] to support parallel processing.
 func New[T pipz.Cloner[T]]() *Factory[T] {
 	factory := &Factory[T]{
-		processors: make(map[pipz.Name]pipz.Chainable[T]),
-		predicates: make(map[pipz.Name]func(context.Context, T) bool),
-		conditions: make(map[pipz.Name]func(context.Context, T) string),
-		schemas:    make(map[string]*Schema),
-		pipelines:  make(map[string]*atomic.Pointer[pipz.Chainable[T]]),
-		channels:   make(map[string]chan<- T),
+		processors:    make(map[pipz.Name]processorMeta[T]),
+		predicates:    make(map[pipz.Name]predicateMeta[T]),
+		conditions:    make(map[pipz.Name]conditionMeta[T]),
+		reducers:      make(map[pipz.Name]reducerMeta[T]),
+		errorHandlers: make(map[pipz.Name]errorHandlerMeta[T]),
+		schemas:       make(map[string]*Schema),
+		pipelines:     make(map[string]*atomic.Pointer[pipz.Chainable[T]]),
+		channels:      make(map[string]chan<- T),
 	}
 
-	zlog.Emit(FactoryCreated, "Flume factory created",
-		zlog.String("type", fmt.Sprintf("%T", *new(T))))
+	capitan.Emit(context.Background(), FactoryCreated,
+		KeyType.Field(fmt.Sprintf("%T", *new(T))))
 
 	return factory
 }
 
 // Add registers one or more processors to the factory using their intrinsic names.
+// For processors with metadata, use AddWithMeta instead.
 func (f *Factory[T]) Add(processors ...pipz.Chainable[T]) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	for _, processor := range processors {
-		f.processors[processor.Name()] = processor
+		f.processors[processor.Name()] = processorMeta[T]{
+			processor: processor,
+		}
 
-		zlog.Emit(ProcessorRegistered, "Processor registered",
-			zlog.String("name", string(processor.Name()))) //nolint:unconvert
+		capitan.Emit(context.Background(), ProcessorRegistered,
+			KeyName.Field(string(processor.Name()))) //nolint:unconvert
+	}
+}
+
+// AddWithMeta registers one or more processors with metadata for introspection.
+func (f *Factory[T]) AddWithMeta(processors ...ProcessorMeta[T]) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, pm := range processors {
+		f.processors[pm.Processor.Name()] = processorMeta[T]{
+			processor:   pm.Processor,
+			description: pm.Description,
+			tags:        pm.Tags,
+		}
+
+		capitan.Emit(context.Background(), ProcessorRegistered,
+			KeyName.Field(string(pm.Processor.Name()))) //nolint:unconvert
 	}
 }
 
@@ -125,10 +205,13 @@ func (f *Factory[T]) AddPredicate(predicates ...Predicate[T]) {
 	defer f.mu.Unlock()
 
 	for _, p := range predicates {
-		f.predicates[p.Name] = p.Predicate
+		f.predicates[p.Name] = predicateMeta[T]{
+			description: p.Description,
+			predicate:   p.Predicate,
+		}
 
-		zlog.Emit(PredicateRegistered, "Predicate registered",
-			zlog.String("name", string(p.Name))) //nolint:unconvert
+		capitan.Emit(context.Background(), PredicateRegistered,
+			KeyName.Field(string(p.Name))) //nolint:unconvert
 	}
 }
 
@@ -138,10 +221,46 @@ func (f *Factory[T]) AddCondition(conditions ...Condition[T]) {
 	defer f.mu.Unlock()
 
 	for _, c := range conditions {
-		f.conditions[c.Name] = c.Condition
+		f.conditions[c.Name] = conditionMeta[T]{
+			description: c.Description,
+			values:      c.Values,
+			condition:   c.Condition,
+		}
 
-		zlog.Emit(ConditionRegistered, "Condition registered",
-			zlog.String("name", string(c.Name))) //nolint:unconvert
+		capitan.Emit(context.Background(), ConditionRegistered,
+			KeyName.Field(string(c.Name))) //nolint:unconvert
+	}
+}
+
+// AddReducer registers one or more reducer functions for use in concurrent result merging.
+func (f *Factory[T]) AddReducer(reducers ...Reducer[T]) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, r := range reducers {
+		f.reducers[r.Name] = reducerMeta[T]{
+			description: r.Description,
+			reducer:     r.Reducer,
+		}
+
+		capitan.Emit(context.Background(), ReducerRegistered,
+			KeyName.Field(string(r.Name))) //nolint:unconvert
+	}
+}
+
+// AddErrorHandler registers one or more error handlers for use in handle nodes.
+func (f *Factory[T]) AddErrorHandler(handlers ...ErrorHandler[T]) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, h := range handlers {
+		f.errorHandlers[h.Name] = errorHandlerMeta[T]{
+			description: h.Description,
+			handler:     h.Handler,
+		}
+
+		capitan.Emit(context.Background(), ErrorHandlerRegistered,
+			KeyName.Field(string(h.Name))) //nolint:unconvert
 	}
 }
 
@@ -150,90 +269,98 @@ func (f *Factory[T]) Build(schema Schema) (pipz.Chainable[T], error) {
 	start := time.Now()
 
 	// Log build start with version if present
-	startFields := []zlog.Field{}
+	startFields := []capitan.Field{}
 	if schema.Version != "" {
-		startFields = append(startFields, zlog.String("version", schema.Version))
+		startFields = append(startFields, KeyVersion.Field(schema.Version))
 	}
-	zlog.Emit(SchemaBuildStarted, "Schema build started", startFields...)
+	capitan.Emit(context.Background(), SchemaBuildStarted, startFields...)
 
 	// Validate first
 	if err := f.ValidateSchema(schema); err != nil {
-		failFields := []zlog.Field{
-			zlog.String("error", err.Error()),
-			zlog.Duration("duration", time.Since(start)),
+		failFields := []capitan.Field{
+			KeyError.Field(err.Error()),
+			KeyDuration.Field(time.Since(start)),
 		}
 		if schema.Version != "" {
-			failFields = append(failFields, zlog.String("version", schema.Version))
+			failFields = append(failFields, KeyVersion.Field(schema.Version))
 		}
-		zlog.Emit(SchemaBuildFailed, "Schema build failed during validation", failFields...)
+		capitan.Emit(context.Background(), SchemaBuildFailed, failFields...)
 		return nil, err
 	}
 
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	pipeline, err := f.buildNode(&schema.Node)
+	pipeline, err := f.buildNode(&schema.Node, "root")
 	if err != nil {
-		failFields := []zlog.Field{
-			zlog.String("error", err.Error()),
-			zlog.Duration("duration", time.Since(start)),
+		failFields := []capitan.Field{
+			KeyError.Field(err.Error()),
+			KeyDuration.Field(time.Since(start)),
 		}
 		if schema.Version != "" {
-			failFields = append(failFields, zlog.String("version", schema.Version))
+			failFields = append(failFields, KeyVersion.Field(schema.Version))
 		}
-		zlog.Emit(SchemaBuildFailed, "Schema build failed during construction", failFields...)
+		capitan.Emit(context.Background(), SchemaBuildFailed, failFields...)
 		return nil, err
 	}
 
-	completeFields := []zlog.Field{
-		zlog.Duration("duration", time.Since(start)),
+	completeFields := []capitan.Field{
+		KeyDuration.Field(time.Since(start)),
 	}
 	if schema.Version != "" {
-		completeFields = append(completeFields, zlog.String("version", schema.Version))
+		completeFields = append(completeFields, KeyVersion.Field(schema.Version))
 	}
-	zlog.Emit(SchemaBuildCompleted, "Schema build completed", completeFields...)
+	capitan.Emit(context.Background(), SchemaBuildCompleted, completeFields...)
 	return pipeline, nil
 }
 
 // buildNode recursively builds a pipeline node.
-func (f *Factory[T]) buildNode(node *Node) (pipz.Chainable[T], error) {
+func (f *Factory[T]) buildNode(node *Node, path string) (pipz.Chainable[T], error) {
 	// Handle processor reference
 	if node.Ref != "" {
-		processor, exists := f.processors[pipz.Name(node.Ref)] //nolint:unconvert
+		pm, exists := f.processors[pipz.Name(node.Ref)] //nolint:unconvert
 		if !exists {
-			return nil, fmt.Errorf("processor not found: %s", node.Ref)
+			return nil, fmt.Errorf("%s: processor '%s' not found", path, node.Ref)
 		}
-		return processor, nil
+		return pm.processor, nil
 	}
 
 	// Handle connector types
 	switch node.Type {
 	case "sequence":
-		return f.buildSequence(node)
-	case "parallel", "concurrent":
-		return f.buildConcurrent(node)
+		return f.buildSequence(node, path)
+	case "concurrent":
+		return f.buildConcurrent(node, path)
 	case "race":
-		return f.buildRace(node)
+		return f.buildRace(node, path)
 	case "fallback":
-		return f.buildFallback(node)
+		return f.buildFallback(node, path)
 	case "retry":
-		return f.buildRetry(node)
+		return f.buildRetry(node, path)
 	case "timeout":
-		return f.buildTimeout(node)
+		return f.buildTimeout(node, path)
 	case "filter":
-		return f.buildFilter(node)
+		return f.buildFilter(node, path)
 	case "switch":
-		return f.buildSwitch(node)
+		return f.buildSwitch(node, path)
 	case "circuit-breaker":
-		return f.buildCircuitBreaker(node)
+		return f.buildCircuitBreaker(node, path)
 	case "rate-limit":
-		return f.buildRateLimit(node)
+		return f.buildRateLimit(node, path)
+	case "contest":
+		return f.buildContest(node, path)
+	case "handle":
+		return f.buildHandle(node, path)
+	case "scaffold":
+		return f.buildScaffold(node, path)
+	case "worker-pool":
+		return f.buildWorkerPool(node, path)
 	default:
 		// Check if it's a stream reference
 		if node.Stream != "" {
-			return f.buildStream(node)
+			return f.buildStream(node, path)
 		}
-		return nil, fmt.Errorf("unknown node type: %s", node.Type)
+		return nil, fmt.Errorf("%s: unknown node type '%s'", path, node.Type)
 	}
 }
 
@@ -266,24 +393,24 @@ func (f *Factory[T]) SetSchema(name string, schema Schema) error {
 	}
 
 	if isUpdate {
-		fields := []zlog.Field{
-			zlog.String("name", name),
+		fields := []capitan.Field{
+			KeyName.Field(name),
 		}
 		if oldSchema.Version != "" {
-			fields = append(fields, zlog.String("old_version", oldSchema.Version))
+			fields = append(fields, KeyOldVersion.Field(oldSchema.Version))
 		}
 		if schema.Version != "" {
-			fields = append(fields, zlog.String("new_version", schema.Version))
+			fields = append(fields, KeyNewVersion.Field(schema.Version))
 		}
-		zlog.Emit(SchemaUpdated, "Schema updated", fields...)
+		capitan.Emit(context.Background(), SchemaUpdated, fields...)
 	} else {
-		fields := []zlog.Field{
-			zlog.String("name", name),
+		fields := []capitan.Field{
+			KeyName.Field(name),
 		}
 		if schema.Version != "" {
-			fields = append(fields, zlog.String("version", schema.Version))
+			fields = append(fields, KeyVersion.Field(schema.Version))
 		}
-		zlog.Emit(SchemaRegistered, "Schema registered", fields...)
+		capitan.Emit(context.Background(), SchemaRegistered, fields...)
 	}
 	return nil
 }
@@ -296,15 +423,15 @@ func (f *Factory[T]) Pipeline(name string) (pipz.Chainable[T], bool) {
 	f.mu.RUnlock()
 
 	if ptr == nil {
-		zlog.Emit(PipelineRetrieved, "Pipeline retrieved",
-			zlog.String("name", name),
-			zlog.Bool("found", false))
+		capitan.Emit(context.Background(), PipelineRetrieved,
+			KeyName.Field(name),
+			KeyFound.Field(false))
 		return nil, false
 	}
 
-	zlog.Emit(PipelineRetrieved, "Pipeline retrieved",
-		zlog.String("name", name),
-		zlog.Bool("found", true))
+	capitan.Emit(context.Background(), PipelineRetrieved,
+		KeyName.Field(name),
+		KeyFound.Field(true))
 	return *ptr.Load(), true
 }
 
@@ -333,8 +460,8 @@ func (f *Factory[T]) RemoveSchema(name string) bool {
 	delete(f.schemas, name)
 	delete(f.pipelines, name)
 
-	zlog.Emit(SchemaRemoved, "Schema removed",
-		zlog.String("name", name))
+	capitan.Emit(context.Background(), SchemaRemoved,
+		KeyName.Field(name))
 	return true
 }
 
@@ -374,6 +501,22 @@ func (f *Factory[T]) HasCondition(name pipz.Name) bool {
 	return exists
 }
 
+// HasReducer checks if a reducer is registered.
+func (f *Factory[T]) HasReducer(name pipz.Name) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, exists := f.reducers[name]
+	return exists
+}
+
+// HasErrorHandler checks if an error handler is registered.
+func (f *Factory[T]) HasErrorHandler(name pipz.Name) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, exists := f.errorHandlers[name]
+	return exists
+}
+
 // ListProcessors returns a slice of all registered processor names.
 func (f *Factory[T]) ListProcessors() []pipz.Name {
 	f.mu.RLock()
@@ -410,6 +553,30 @@ func (f *Factory[T]) ListConditions() []pipz.Name {
 	return names
 }
 
+// ListReducers returns a slice of all registered reducer names.
+func (f *Factory[T]) ListReducers() []pipz.Name {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	names := make([]pipz.Name, 0, len(f.reducers))
+	for name := range f.reducers {
+		names = append(names, name)
+	}
+	return names
+}
+
+// ListErrorHandlers returns a slice of all registered error handler names.
+func (f *Factory[T]) ListErrorHandlers() []pipz.Name {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	names := make([]pipz.Name, 0, len(f.errorHandlers))
+	for name := range f.errorHandlers {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Remove removes one or more processors from the factory.
 // Returns the number of processors actually removed.
 func (f *Factory[T]) Remove(names ...pipz.Name) int {
@@ -422,8 +589,8 @@ func (f *Factory[T]) Remove(names ...pipz.Name) int {
 			delete(f.processors, name)
 			removed++
 
-			zlog.Emit(ProcessorRemoved, "Processor removed",
-				zlog.String("name", string(name))) //nolint:unconvert
+			capitan.Emit(context.Background(), ProcessorRemoved,
+				KeyName.Field(string(name))) //nolint:unconvert
 		}
 	}
 	return removed
@@ -437,8 +604,8 @@ func (f *Factory[T]) AddChannel(name string, channel chan<- T) {
 
 	f.channels[name] = channel
 
-	zlog.Emit(ProcessorRegistered, "Channel registered",
-		zlog.String("name", name))
+	capitan.Emit(context.Background(), ChannelRegistered,
+		KeyName.Field(name))
 }
 
 // GetChannel retrieves a registered channel by name.
@@ -479,8 +646,8 @@ func (f *Factory[T]) RemoveChannel(name string) bool {
 	if _, exists := f.channels[name]; exists {
 		delete(f.channels, name)
 
-		zlog.Emit(ProcessorRemoved, "Channel removed",
-			zlog.String("name", name))
+		capitan.Emit(context.Background(), ChannelRemoved,
+			KeyName.Field(name))
 		return true
 	}
 	return false
@@ -498,8 +665,8 @@ func (f *Factory[T]) RemovePredicate(names ...pipz.Name) int {
 			delete(f.predicates, name)
 			removed++
 
-			zlog.Emit(PredicateRemoved, "Predicate removed",
-				zlog.String("name", string(name))) //nolint:unconvert
+			capitan.Emit(context.Background(), PredicateRemoved,
+				KeyName.Field(string(name))) //nolint:unconvert
 		}
 	}
 	return removed
@@ -517,8 +684,46 @@ func (f *Factory[T]) RemoveCondition(names ...pipz.Name) int {
 			delete(f.conditions, name)
 			removed++
 
-			zlog.Emit(ConditionRemoved, "Condition removed",
-				zlog.String("name", string(name))) //nolint:unconvert
+			capitan.Emit(context.Background(), ConditionRemoved,
+				KeyName.Field(string(name))) //nolint:unconvert
+		}
+	}
+	return removed
+}
+
+// RemoveReducer removes one or more reducers from the factory.
+// Returns the number of reducers actually removed.
+func (f *Factory[T]) RemoveReducer(names ...pipz.Name) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	removed := 0
+	for _, name := range names {
+		if _, exists := f.reducers[name]; exists {
+			delete(f.reducers, name)
+			removed++
+
+			capitan.Emit(context.Background(), ReducerRemoved,
+				KeyName.Field(string(name))) //nolint:unconvert
+		}
+	}
+	return removed
+}
+
+// RemoveErrorHandler removes one or more error handlers from the factory.
+// Returns the number of error handlers actually removed.
+func (f *Factory[T]) RemoveErrorHandler(names ...pipz.Name) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	removed := 0
+	for _, name := range names {
+		if _, exists := f.errorHandlers[name]; exists {
+			delete(f.errorHandlers, name)
+			removed++
+
+			capitan.Emit(context.Background(), ErrorHandlerRemoved,
+				KeyName.Field(string(name))) //nolint:unconvert
 		}
 	}
 	return removed

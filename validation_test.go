@@ -383,6 +383,82 @@ func TestValidation(t *testing.T) {
 				"circular reference detected: 'proc1' creates a cycle",
 			},
 		},
+		{
+			name: "same processor in switch routes is valid",
+			setup: func(f *flume.Factory[TestData]) {
+				f.Add(
+					pipz.Transform("approve", func(_ context.Context, d TestData) TestData {
+						return d
+					}),
+					pipz.Transform("reject", func(_ context.Context, d TestData) TestData {
+						return d
+					}),
+				)
+				f.AddCondition(flume.Condition[TestData]{
+					Name: "route",
+					Condition: func(_ context.Context, _ TestData) string {
+						return "a"
+					},
+				})
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "switch",
+					Condition: "route",
+					Routes: map[string]flume.Node{
+						"high":   {Ref: "reject"},
+						"medium": {Ref: "approve"},
+						"low":    {Ref: "approve"}, // Same as medium - valid in switch
+					},
+				},
+			},
+			expectedErrors: []string{}, // No errors expected
+		},
+		{
+			name: "same processor in filter branches is valid",
+			setup: func(f *flume.Factory[TestData]) {
+				f.Add(
+					pipz.Transform("process", func(_ context.Context, d TestData) TestData {
+						return d
+					}),
+				)
+				f.AddPredicate(flume.Predicate[TestData]{
+					Name: "check",
+					Predicate: func(_ context.Context, _ TestData) bool {
+						return true
+					},
+				})
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "filter",
+					Predicate: "check",
+					Then:      &flume.Node{Ref: "process"},
+					Else:      &flume.Node{Ref: "process"}, // Same as then - valid in filter
+				},
+			},
+			expectedErrors: []string{}, // No errors expected
+		},
+		{
+			name: "same processor in fallback branches is valid",
+			setup: func(f *flume.Factory[TestData]) {
+				f.Add(
+					pipz.Transform("handler", func(_ context.Context, d TestData) TestData {
+						return d
+					}),
+				)
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "fallback",
+					Children: []flume.Node{
+						{Ref: "handler"}, // Primary
+						{Ref: "handler"}, // Fallback - same processor, valid
+					},
+				},
+			},
+			expectedErrors: []string{}, // No errors expected
+		},
 	}
 
 	for _, tt := range tests {

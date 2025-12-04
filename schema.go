@@ -14,19 +14,19 @@ type Node struct { //nolint:govet
 	// Ref is a reference to a registered processor (mutually exclusive with Type)
 	Ref string `json:"ref,omitempty" yaml:"ref,omitempty"`
 
-	// Type defines the connector type (sequence, parallel, switch, etc.)
+	// Type defines the connector type (sequence, concurrent, switch, etc.)
 	Type string `json:"type,omitempty" yaml:"type,omitempty"`
 
 	// Name for the created connector (optional, defaults to type)
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
-	// Children for composite connectors (sequence, parallel, etc.)
+	// Children for composite connectors (sequence, concurrent, etc.)
 	Children []Node `json:"children,omitempty" yaml:"children,omitempty"`
 
 	// Child for single-child connectors (timeout, retry, etc.)
 	Child *Node `json:"child,omitempty" yaml:"child,omitempty"`
 
-	// Filter fields
+	// Filter/Contest fields
 	Predicate string `json:"predicate,omitempty" yaml:"predicate,omitempty"`
 	Then      *Node  `json:"then,omitempty" yaml:"then,omitempty"`
 	Else      *Node  `json:"else,omitempty" yaml:"else,omitempty"`
@@ -52,5 +52,15 @@ type Node struct { //nolint:govet
 	BurstSize         int     `json:"burst_size,omitempty" yaml:"burst_size,omitempty"`
 
 	// Stream configuration
-	Stream string `json:"stream,omitempty" yaml:"stream,omitempty"`
+	Stream        string `json:"stream,omitempty" yaml:"stream,omitempty"`
+	StreamTimeout string `json:"stream_timeout,omitempty" yaml:"stream_timeout,omitempty"`
+
+	// Concurrent configuration
+	Reducer string `json:"reducer,omitempty" yaml:"reducer,omitempty"`
+
+	// Handle configuration
+	ErrorHandler string `json:"error_handler,omitempty" yaml:"error_handler,omitempty"`
+
+	// Worker pool configuration
+	Workers int `json:"workers,omitempty" yaml:"workers,omitempty"`
 }

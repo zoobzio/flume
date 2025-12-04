@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zoobzio/pipz"
 )
@@ -93,7 +94,7 @@ func TestBuildStream(t *testing.T) {
 			Stream: "test-channel",
 		}
 
-		effect, err := factory.buildStream(node)
+		effect, err := factory.buildStream(node, "root")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -131,18 +132,18 @@ func TestBuildStream(t *testing.T) {
 			{
 				name: "empty stream name",
 				node: &Node{},
-				want: "stream node requires a stream name",
+				want: "root: stream node requires a stream name",
 			},
 			{
 				name: "non-existent channel",
 				node: &Node{Stream: "missing"},
-				want: "channel not found: missing",
+				want: "root: channel 'missing' not found",
 			},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, err := factory.buildStream(tt.node)
+				_, err := factory.buildStream(tt.node, "root")
 				if err == nil {
 					t.Error("expected error")
 				} else if err.Error() != tt.want {
@@ -248,6 +249,141 @@ func TestStreamValidation(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestStreamTimeout(t *testing.T) {
+	t.Run("stream with timeout succeeds when channel has capacity", func(t *testing.T) {
+		factory := New[*testData]()
+		channel := make(chan *testData, 10)
+		factory.AddChannel("test-channel", channel)
+
+		schema := Schema{
+			Node: Node{
+				Stream:        "test-channel",
+				StreamTimeout: "1s",
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := &testData{value: "test"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result.value != "test" {
+			t.Errorf("expected 'test', got '%s'", result.value)
+		}
+
+		// Verify channel received data
+		select {
+		case received := <-channel:
+			if received.value != "test" {
+				t.Errorf("expected 'test', got '%s'", received.value)
+			}
+		default:
+			t.Error("channel didn't receive expected data")
+		}
+	})
+
+	t.Run("stream with timeout fails when channel is full", func(t *testing.T) {
+		factory := New[*testData]()
+		channel := make(chan *testData) // unbuffered, will block
+		factory.AddChannel("blocked-channel", channel)
+
+		schema := Schema{
+			Node: Node{
+				Stream:        "blocked-channel",
+				StreamTimeout: "50ms",
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := &testData{value: "test"}
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected timeout error but got none")
+		}
+		if !contains(err.Error(), "write timeout") {
+			t.Errorf("expected timeout error, got: %v", err)
+		}
+	})
+
+	t.Run("stream without timeout respects context cancellation", func(t *testing.T) {
+		factory := New[*testData]()
+		channel := make(chan *testData) // unbuffered, will block
+		factory.AddChannel("blocked-channel", channel)
+
+		schema := Schema{
+			Node: Node{
+				Stream: "blocked-channel",
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		input := &testData{value: "test"}
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected context error but got none")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("expected context.DeadlineExceeded, got: %v", err)
+		}
+	})
+
+	t.Run("stream timeout validation", func(t *testing.T) {
+		factory := New[*testData]()
+		channel := make(chan *testData, 10)
+		factory.AddChannel("test-channel", channel)
+
+		schema := Schema{
+			Node: Node{
+				Stream:        "test-channel",
+				StreamTimeout: "invalid",
+			},
+		}
+
+		err := factory.ValidateSchema(schema)
+		if err == nil {
+			t.Fatal("expected validation error but got none")
+		}
+		if !contains(err.Error(), "invalid stream_timeout") {
+			t.Errorf("expected stream_timeout validation error, got: %v", err)
+		}
+	})
+}
+
+// contains checks if s contains substr.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (substr == "" || findSubstring(s, substr))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func TestStreamIntegration(t *testing.T) {

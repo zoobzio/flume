@@ -1,5 +1,14 @@
 # Flume
 
+[![CI Status](https://github.com/zoobzio/flume/workflows/CI/badge.svg)](https://github.com/zoobzio/flume/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zoobzio/flume/graph/badge.svg?branch=main)](https://codecov.io/gh/zoobzio/flume)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zoobzio/flume)](https://goreportcard.com/report/github.com/zoobzio/flume)
+[![CodeQL](https://github.com/zoobzio/flume/workflows/CodeQL/badge.svg)](https://github.com/zoobzio/flume/security/code-scanning)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zoobzio/flume.svg)](https://pkg.go.dev/github.com/zoobzio/flume)
+[![License](https://img.shields.io/github/license/zoobzio/flume)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/zoobzio/flume)](go.mod)
+[![Release](https://img.shields.io/github/v/release/zoobzio/flume)](https://github.com/zoobzio/flume/releases)
+
 A dynamic pipeline factory for [pipz](https://github.com/zoobzio/pipz) that enables schema-driven pipeline construction with hot-reloading capabilities.
 
 ## Overview
@@ -236,7 +245,7 @@ children:
     then:
       ref: premium-discount
       
-  - type: parallel  # Requires Cloner[T]
+  - type: concurrent  # Requires Cloner[T]
     children:
       - ref: check-inventory
       - type: filter
@@ -293,7 +302,7 @@ Validation checks:
 
 ## Channel Integration
 
-Flume provides seamless integration with Go channels, allowing pipelines to terminate by sending data to registered channels. This enables easy integration with streaming systems like [streamz](https://github.com/zoobzio/streamz):
+Flume provides seamless integration with Go channels, allowing pipelines to terminate by sending data to registered channels:
 
 ### Basic Channel Usage
 
@@ -322,42 +331,6 @@ children:
 `
 
 pipeline, err := factory.BuildFromYAML(schema)
-```
-
-### Streamz Integration Example
-
-```go
-import "github.com/zoobzio/streamz"
-
-// Create input channel
-inputChannel := make(chan MyData, 100)
-
-// Register with flume
-factory.AddChannel("output-stream", inputChannel)
-
-// Set up streamz pipeline using the same channel
-go func() {
-    batcher := streamz.NewBatcher[MyData](streamz.BatchConfig{
-        MaxSize:    10,
-        MaxLatency: 100 * time.Millisecond,
-    })
-    
-    batched := batcher.Process(ctx, inputChannel)
-    
-    for batch := range batched {
-        // Process batches
-        saveBatchToDatabase(batch)
-    }
-}()
-
-// Flume pipeline sends individual items to channel
-// Streamz processes them as batches
-schema := `
-type: sequence
-children:
-  - ref: validate
-  - stream: output-stream
-`
 ```
 
 ### Channel Routing
@@ -424,7 +397,7 @@ This pattern is useful for:
 ## Supported Connectors
 
 - **sequence**: Sequential processing
-- **parallel/concurrent**: Parallel execution (requires `Cloner[T]`)
+- **concurrent**: Parallel execution (requires `Cloner[T]`)
 - **race**: First successful result (requires `Cloner[T]`)
 - **fallback**: Try primary, fall back on error
 - **retry**: Retry with configurable attempts
@@ -445,4 +418,4 @@ This pattern is useful for:
 
 ## License
 
-Same as pipz - see LICENSE file.
+MIT License - see LICENSE file.

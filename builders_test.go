@@ -180,17 +180,6 @@ func TestBuildConcurrent(t *testing.T) {
 			expectError: true,
 			errorMsg:    "concurrent requires at least one child",
 		},
-		{
-			name: "parallel type (alias for concurrent)",
-			schema: flume.Schema{
-				Node: flume.Node{
-					Type: "parallel",
-					Children: []flume.Node{
-						{Ref: "add-suffix"},
-					},
-				},
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -1165,7 +1154,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					Type: "invalid-type",
 				},
 			},
-			errorContains: "unknown node type: invalid-type",
+			errorContains: "unknown node type 'invalid-type'",
 		},
 		{
 			name: "sequence with invalid child",
@@ -1177,7 +1166,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					},
 				},
 			},
-			errorContains: "unknown node type: invalid-child-type",
+			errorContains: "unknown node type 'invalid-child-type'",
 		},
 		{
 			name: "filter with invalid then branch",
@@ -1188,7 +1177,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					Then:      &flume.Node{Type: "invalid-then"},
 				},
 			},
-			errorContains: "unknown node type: invalid-then",
+			errorContains: "unknown node type 'invalid-then'",
 		},
 		{
 			name: "filter with invalid else branch - add predicate first",
@@ -1200,7 +1189,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					Else:      &flume.Node{Type: "invalid-else"},
 				},
 			},
-			errorContains: "unknown node type: invalid-else",
+			errorContains: "unknown node type 'invalid-else'",
 		},
 		{
 			name: "switch with invalid route",
@@ -1213,7 +1202,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					},
 				},
 			},
-			errorContains: "unknown node type: invalid-route",
+			errorContains: "unknown node type 'invalid-route'",
 		},
 		{
 			name: "switch with invalid default - add condition first",
@@ -1227,7 +1216,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					Default: &flume.Node{Type: "invalid-default"},
 				},
 			},
-			errorContains: "unknown node type: invalid-default",
+			errorContains: "unknown node type 'invalid-default'",
 		},
 		{
 			name: "retry with invalid child",
@@ -1237,7 +1226,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					Child: &flume.Node{Type: "invalid-retry-child"},
 				},
 			},
-			errorContains: "unknown node type: invalid-retry-child",
+			errorContains: "unknown node type 'invalid-retry-child'",
 		},
 		{
 			name: "timeout with invalid child",
@@ -1247,7 +1236,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					Child: &flume.Node{Type: "invalid-timeout-child"},
 				},
 			},
-			errorContains: "unknown node type: invalid-timeout-child",
+			errorContains: "unknown node type 'invalid-timeout-child'",
 		},
 		{
 			name: "fallback with invalid primary",
@@ -1260,7 +1249,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					},
 				},
 			},
-			errorContains: "unknown node type: invalid-primary",
+			errorContains: "unknown node type 'invalid-primary'",
 		},
 		{
 			name: "fallback with invalid fallback branch - add processor first",
@@ -1273,7 +1262,7 @@ func TestBuildNodeErrors(t *testing.T) {
 					},
 				},
 			},
-			errorContains: "unknown node type: invalid-fallback",
+			errorContains: "unknown node type 'invalid-fallback'",
 		},
 	}
 
@@ -1506,6 +1495,819 @@ func TestBuildRateLimit(t *testing.T) {
 
 			if result.Value != tt.expected {
 				t.Errorf("Expected '%s', got '%s'", tt.expected, result.Value)
+			}
+		})
+	}
+}
+
+func TestBuildConcurrentWithReducer(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	factory.Add(
+		pipz.Transform("double", func(_ context.Context, d TestData) TestData {
+			d.Counter *= 2
+			return d
+		}),
+		pipz.Transform("triple", func(_ context.Context, d TestData) TestData {
+			d.Counter *= 3
+			return d
+		}),
+	)
+
+	factory.AddReducer(flume.Reducer[TestData]{
+		Name:        "sum-reducer",
+		Description: "Sums counter values from all results",
+		Reducer: func(original TestData, results map[pipz.Name]TestData, _ map[pipz.Name]error) TestData {
+			total := 0
+			for _, r := range results {
+				total += r.Counter
+			}
+			original.Counter = total
+			return original
+		},
+	})
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		input       TestData
+		expected    int
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "concurrent with reducer",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "concurrent",
+					Reducer: "sum-reducer",
+					Children: []flume.Node{
+						{Ref: "double"},
+						{Ref: "triple"},
+					},
+				},
+			},
+			input:    TestData{Counter: 10},
+			expected: 50, // 10*2 + 10*3 = 20 + 30 = 50
+		},
+		{
+			name: "concurrent with reducer and custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "concurrent",
+					Name:    "custom-concurrent",
+					Reducer: "sum-reducer",
+					Children: []flume.Node{
+						{Ref: "double"},
+					},
+				},
+			},
+			input:    TestData{Counter: 5},
+			expected: 10, // 5*2 = 10
+		},
+		{
+			name: "concurrent with missing reducer",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "concurrent",
+					Reducer: "non-existent",
+					Children: []flume.Node{
+						{Ref: "double"},
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "reducer not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, tt.input)
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			if result.Counter != tt.expected {
+				t.Errorf("Expected counter %d, got %d", tt.expected, result.Counter)
+			}
+		})
+	}
+}
+
+func TestBuildContest(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	factory.Add(
+		pipz.Transform("winner", func(_ context.Context, d TestData) TestData {
+			d.Value = "winner"
+			d.Counter = 100
+			return d
+		}),
+		pipz.Transform("loser", func(_ context.Context, d TestData) TestData {
+			d.Value = "loser"
+			d.Counter = 50
+			return d
+		}),
+	)
+
+	factory.AddPredicate(flume.Predicate[TestData]{
+		Name: "highest-counter",
+		Predicate: func(_ context.Context, d TestData) bool {
+			return d.Counter >= 100
+		},
+	})
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		expected    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "contest basic",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "contest",
+					Predicate: "highest-counter",
+					Children: []flume.Node{
+						{Ref: "winner"},
+						{Ref: "loser"},
+					},
+				},
+			},
+			expected: "winner",
+		},
+		{
+			name: "contest with custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "contest",
+					Name:      "custom-contest",
+					Predicate: "highest-counter",
+					Children: []flume.Node{
+						{Ref: "winner"},
+					},
+				},
+			},
+			expected: "winner",
+		},
+		{
+			name: "contest without predicate",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "contest",
+					Children: []flume.Node{
+						{Ref: "winner"},
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "contest requires a predicate",
+		},
+		{
+			name: "contest without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "contest",
+					Predicate: "highest-counter",
+				},
+			},
+			expectError: true,
+			errorMsg:    "contest requires at least one child",
+		},
+		{
+			name: "contest with missing predicate",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "contest",
+					Predicate: "non-existent",
+					Children: []flume.Node{
+						{Ref: "winner"},
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "predicate not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, TestData{})
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			if result.Value != tt.expected {
+				t.Errorf("Expected '%s', got '%s'", tt.expected, result.Value)
+			}
+		})
+	}
+}
+
+func TestBuildHandle(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	factory.Add(
+		pipz.Apply("failing", func(_ context.Context, d TestData) (TestData, error) {
+			return d, errors.New("intentional failure")
+		}),
+		pipz.Transform("stable", func(_ context.Context, d TestData) TestData {
+			d.Value = "stable"
+			return d
+		}),
+	)
+
+	factory.AddErrorHandler(flume.ErrorHandler[TestData]{
+		Name:        "log-handler",
+		Description: "Logs errors and marks as handled",
+		Handler: pipz.Transform("error-handler", func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+			e.InputData.Value = "handled"
+			return e
+		}),
+	})
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		expected    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "handle with stable processor",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:         "handle",
+					ErrorHandler: "log-handler",
+					Child:        &flume.Node{Ref: "stable"},
+				},
+			},
+			expected: "stable",
+		},
+		{
+			name: "handle with custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:         "handle",
+					Name:         "custom-handle",
+					ErrorHandler: "log-handler",
+					Child:        &flume.Node{Ref: "stable"},
+				},
+			},
+			expected: "stable",
+		},
+		{
+			name: "handle without error handler",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:  "handle",
+					Child: &flume.Node{Ref: "stable"},
+				},
+			},
+			expectError: true,
+			errorMsg:    "handle requires an error handler",
+		},
+		{
+			name: "handle without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:         "handle",
+					ErrorHandler: "log-handler",
+				},
+			},
+			expectError: true,
+			errorMsg:    "handle requires a child",
+		},
+		{
+			name: "handle with missing error handler",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:         "handle",
+					ErrorHandler: "non-existent",
+					Child:        &flume.Node{Ref: "stable"},
+				},
+			},
+			expectError: true,
+			errorMsg:    "error handler not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, TestData{})
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			if result.Value != tt.expected {
+				t.Errorf("Expected '%s', got '%s'", tt.expected, result.Value)
+			}
+		})
+	}
+}
+
+func TestBuildScaffold(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	executed := make(chan bool, 2)
+	factory.Add(
+		pipz.Transform("background-task", func(_ context.Context, d TestData) TestData {
+			executed <- true
+			d.Value = "background"
+			return d
+		}),
+		pipz.Transform("another-task", func(_ context.Context, d TestData) TestData {
+			executed <- true
+			d.Value = "another"
+			return d
+		}),
+	)
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "scaffold basic",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "scaffold",
+					Children: []flume.Node{
+						{Ref: "background-task"},
+						{Ref: "another-task"},
+					},
+				},
+			},
+		},
+		{
+			name: "scaffold with custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "scaffold",
+					Name: "custom-scaffold",
+					Children: []flume.Node{
+						{Ref: "background-task"},
+					},
+				},
+			},
+		},
+		{
+			name: "scaffold without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "scaffold",
+				},
+			},
+			expectError: true,
+			errorMsg:    "scaffold requires at least one child",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, TestData{Value: "original"})
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			// Scaffold returns original input unchanged
+			if result.Value != "original" {
+				t.Errorf("Expected 'original', got '%s'", result.Value)
+			}
+		})
+	}
+}
+
+func TestBuildWorkerPool(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	factory.Add(
+		pipz.Transform("worker-task", func(_ context.Context, d TestData) TestData {
+			d.Value = "processed"
+			d.Counter++
+			return d
+		}),
+	)
+
+	tests := []struct {
+		name        string
+		schema      flume.Schema
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "worker pool basic",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "worker-pool",
+					Workers: 4,
+					Children: []flume.Node{
+						{Ref: "worker-task"},
+					},
+				},
+			},
+		},
+		{
+			name: "worker pool with default workers",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "worker-pool",
+					Children: []flume.Node{
+						{Ref: "worker-task"},
+					},
+				},
+			},
+		},
+		{
+			name: "worker pool with custom name",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "worker-pool",
+					Name:    "custom-pool",
+					Workers: 2,
+					Children: []flume.Node{
+						{Ref: "worker-task"},
+					},
+				},
+			},
+		},
+		{
+			name: "worker pool without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "worker-pool",
+					Workers: 4,
+				},
+			},
+			expectError: true,
+			errorMsg:    "worker-pool requires at least one child",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := factory.Build(tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			// WorkerPool returns the original input (fan-out pattern)
+			ctx := context.Background()
+			result, pErr := pipeline.Process(ctx, TestData{Value: "original"})
+			if pErr != nil {
+				t.Fatalf("Process error: %v", pErr)
+			}
+
+			// Verify original input is returned unchanged
+			if result.Value != "original" {
+				t.Errorf("Expected 'original', got '%s'", result.Value)
+			}
+		})
+	}
+}
+
+func TestReducerRegistration(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// Test AddReducer
+	factory.AddReducer(
+		flume.Reducer[TestData]{
+			Name:        "test-reducer",
+			Description: "Test reducer",
+			Reducer: func(original TestData, _ map[pipz.Name]TestData, _ map[pipz.Name]error) TestData {
+				return original
+			},
+		},
+		flume.Reducer[TestData]{
+			Name:        "another-reducer",
+			Description: "Another reducer",
+			Reducer: func(original TestData, _ map[pipz.Name]TestData, _ map[pipz.Name]error) TestData {
+				return original
+			},
+		},
+	)
+
+	// Test HasReducer
+	if !factory.HasReducer("test-reducer") {
+		t.Error("Expected HasReducer to return true for registered reducer")
+	}
+	if factory.HasReducer("non-existent") {
+		t.Error("Expected HasReducer to return false for non-existent reducer")
+	}
+
+	// Test ListReducers
+	reducers := factory.ListReducers()
+	if len(reducers) != 2 {
+		t.Errorf("Expected 2 reducers, got %d", len(reducers))
+	}
+
+	// Test RemoveReducer
+	factory.RemoveReducer("test-reducer")
+	if factory.HasReducer("test-reducer") {
+		t.Error("Expected reducer to be removed")
+	}
+}
+
+func TestErrorHandlerRegistration(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// Test AddErrorHandler
+	factory.AddErrorHandler(
+		flume.ErrorHandler[TestData]{
+			Name:        "test-handler",
+			Description: "Test handler",
+			Handler: pipz.Transform("handler", func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+				return e
+			}),
+		},
+		flume.ErrorHandler[TestData]{
+			Name:        "another-handler",
+			Description: "Another handler",
+			Handler: pipz.Transform("handler2", func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+				return e
+			}),
+		},
+	)
+
+	// Test HasErrorHandler
+	if !factory.HasErrorHandler("test-handler") {
+		t.Error("Expected HasErrorHandler to return true for registered handler")
+	}
+	if factory.HasErrorHandler("non-existent") {
+		t.Error("Expected HasErrorHandler to return false for non-existent handler")
+	}
+
+	// Test ListErrorHandlers
+	handlers := factory.ListErrorHandlers()
+	if len(handlers) != 2 {
+		t.Errorf("Expected 2 handlers, got %d", len(handlers))
+	}
+
+	// Test RemoveErrorHandler
+	factory.RemoveErrorHandler("test-handler")
+	if factory.HasErrorHandler("test-handler") {
+		t.Error("Expected handler to be removed")
+	}
+}
+
+func TestBuildErrorPaths(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// Register minimal components for testing
+	factory.Add(
+		pipz.Transform("exists", func(_ context.Context, d TestData) TestData {
+			return d
+		}),
+	)
+	factory.AddPredicate(flume.Predicate[TestData]{
+		Name:      "exists",
+		Predicate: func(_ context.Context, _ TestData) bool { return true },
+	})
+	factory.AddCondition(flume.Condition[TestData]{
+		Name:      "exists",
+		Condition: func(_ context.Context, _ TestData) string { return "a" },
+	})
+
+	tests := []struct {
+		name         string
+		schema       flume.Schema
+		expectedPath string
+	}{
+		{
+			name: "missing processor at root",
+			schema: flume.Schema{
+				Node: flume.Node{Ref: "missing"},
+			},
+			expectedPath: "root: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in sequence child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{Ref: "exists"},
+						{Ref: "missing"},
+					},
+				},
+			},
+			expectedPath: "root.children[1]: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in nested sequence",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{
+							Type: "sequence",
+							Children: []flume.Node{
+								{Ref: "missing"},
+							},
+						},
+					},
+				},
+			},
+			expectedPath: "root.children[0].children[0]: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in filter then",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "filter",
+					Predicate: "exists",
+					Then:      &flume.Node{Ref: "missing"},
+				},
+			},
+			expectedPath: "root.then: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in filter else",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "filter",
+					Predicate: "exists",
+					Then:      &flume.Node{Ref: "exists"},
+					Else:      &flume.Node{Ref: "missing"},
+				},
+			},
+			expectedPath: "root.else: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in switch route",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "switch",
+					Condition: "exists",
+					Routes: map[string]flume.Node{
+						"a": {Ref: "missing"},
+					},
+				},
+			},
+			expectedPath: "root.routes.a: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in switch default",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "switch",
+					Condition: "exists",
+					Routes: map[string]flume.Node{
+						"a": {Ref: "exists"},
+					},
+					Default: &flume.Node{Ref: "missing"},
+				},
+			},
+			expectedPath: "root.default: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in retry child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:  "retry",
+					Child: &flume.Node{Ref: "missing"},
+				},
+			},
+			expectedPath: "root.child: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in timeout child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:  "timeout",
+					Child: &flume.Node{Ref: "missing"},
+				},
+			},
+			expectedPath: "root.child: processor 'missing' not found",
+		},
+		{
+			name: "missing processor in fallback primary",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "fallback",
+					Children: []flume.Node{
+						{Ref: "missing"},
+						{Ref: "exists"},
+					},
+				},
+			},
+			expectedPath: "root.children[0](primary): processor 'missing' not found",
+		},
+		{
+			name: "missing processor in fallback secondary",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "fallback",
+					Children: []flume.Node{
+						{Ref: "exists"},
+						{Ref: "missing"},
+					},
+				},
+			},
+			expectedPath: "root.children[1](fallback): processor 'missing' not found",
+		},
+		{
+			name: "error includes connector type context",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{
+							Type: "concurrent",
+							Children: []flume.Node{
+								{Ref: "exists"},
+								{
+									Type: "race",
+									Children: []flume.Node{
+										{Ref: "missing"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedPath: "root.children[0].children[1].children[0]: processor 'missing' not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := factory.Build(tt.schema)
+			if err == nil {
+				t.Fatal("expected error but got none")
+			}
+			if err.Error() != tt.expectedPath {
+				t.Errorf("expected error:\n  %s\ngot:\n  %s", tt.expectedPath, err.Error())
 			}
 		})
 	}

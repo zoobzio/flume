@@ -1,14 +1,15 @@
 package flume
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/pipz"
-	"github.com/zoobzio/zlog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,15 +18,15 @@ import (
 func (f *Factory[T]) BuildFromFile(path string) (pipz.Chainable[T], error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		zlog.Emit(SchemaFileFailed, "Failed to read schema file",
-			zlog.String("path", path),
-			zlog.String("error", err.Error()))
+		capitan.Emit(context.Background(), SchemaFileFailed,
+			KeyPath.Field(path),
+			KeyError.Field(err.Error()))
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	zlog.Emit(SchemaFileLoaded, "Schema file loaded",
-		zlog.String("path", path),
-		zlog.Int("size_bytes", len(data)))
+	capitan.Emit(context.Background(), SchemaFileLoaded,
+		KeyPath.Field(path),
+		KeySizeBytes.Field(len(data)))
 
 	var schema Schema
 	ext := strings.ToLower(filepath.Ext(path))
@@ -33,28 +34,28 @@ func (f *Factory[T]) BuildFromFile(path string) (pipz.Chainable[T], error) {
 	switch ext {
 	case ".json":
 		if err := json.Unmarshal(data, &schema); err != nil {
-			zlog.Emit(SchemaParseFailed, "Failed to parse JSON schema",
-				zlog.String("path", path),
-				zlog.String("error", err.Error()))
+			capitan.Emit(context.Background(), SchemaParseFailed,
+				KeyPath.Field(path),
+				KeyError.Field(err.Error()))
 			return nil, fmt.Errorf("failed to parse JSON: %w", err)
 		}
-		logFields := []zlog.Field{zlog.String("path", path)}
+		fields := []capitan.Field{KeyPath.Field(path)}
 		if schema.Version != "" {
-			logFields = append(logFields, zlog.String("version", schema.Version))
+			fields = append(fields, KeyVersion.Field(schema.Version))
 		}
-		zlog.Emit(SchemaJSONParsed, "JSON schema parsed", logFields...)
+		capitan.Emit(context.Background(), SchemaJSONParsed, fields...)
 	case ".yaml", ".yml":
 		if err := yaml.Unmarshal(data, &schema); err != nil {
-			zlog.Emit(SchemaParseFailed, "Failed to parse YAML schema",
-				zlog.String("path", path),
-				zlog.String("error", err.Error()))
+			capitan.Emit(context.Background(), SchemaParseFailed,
+				KeyPath.Field(path),
+				KeyError.Field(err.Error()))
 			return nil, fmt.Errorf("failed to parse YAML: %w", err)
 		}
-		logFields := []zlog.Field{zlog.String("path", path)}
+		fields := []capitan.Field{KeyPath.Field(path)}
 		if schema.Version != "" {
-			logFields = append(logFields, zlog.String("version", schema.Version))
+			fields = append(fields, KeyVersion.Field(schema.Version))
 		}
-		zlog.Emit(SchemaYAMLParsed, "YAML schema parsed", logFields...)
+		capitan.Emit(context.Background(), SchemaYAMLParsed, fields...)
 	default:
 		return nil, fmt.Errorf("unsupported file format: %s", ext)
 	}
@@ -66,15 +67,15 @@ func (f *Factory[T]) BuildFromFile(path string) (pipz.Chainable[T], error) {
 func (f *Factory[T]) BuildFromJSON(jsonStr string) (pipz.Chainable[T], error) {
 	var schema Schema
 	if err := json.Unmarshal([]byte(jsonStr), &schema); err != nil {
-		zlog.Emit(SchemaParseFailed, "Failed to parse JSON string",
-			zlog.String("error", err.Error()))
+		capitan.Emit(context.Background(), SchemaParseFailed,
+			KeyError.Field(err.Error()))
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
-	logFields := []zlog.Field{}
+	fields := []capitan.Field{}
 	if schema.Version != "" {
-		logFields = append(logFields, zlog.String("version", schema.Version))
+		fields = append(fields, KeyVersion.Field(schema.Version))
 	}
-	zlog.Emit(SchemaJSONParsed, "JSON string parsed", logFields...)
+	capitan.Emit(context.Background(), SchemaJSONParsed, fields...)
 	return f.Build(schema)
 }
 
@@ -82,14 +83,14 @@ func (f *Factory[T]) BuildFromJSON(jsonStr string) (pipz.Chainable[T], error) {
 func (f *Factory[T]) BuildFromYAML(yamlStr string) (pipz.Chainable[T], error) {
 	var schema Schema
 	if err := yaml.Unmarshal([]byte(yamlStr), &schema); err != nil {
-		zlog.Emit(SchemaParseFailed, "Failed to parse YAML string",
-			zlog.String("error", err.Error()))
+		capitan.Emit(context.Background(), SchemaParseFailed,
+			KeyError.Field(err.Error()))
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
-	logFields := []zlog.Field{}
+	fields := []capitan.Field{}
 	if schema.Version != "" {
-		logFields = append(logFields, zlog.String("version", schema.Version))
+		fields = append(fields, KeyVersion.Field(schema.Version))
 	}
-	zlog.Emit(SchemaYAMLParsed, "YAML string parsed", logFields...)
+	capitan.Emit(context.Background(), SchemaYAMLParsed, fields...)
 	return f.Build(schema)
 }
