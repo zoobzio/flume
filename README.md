@@ -186,6 +186,53 @@ factory.AddCondition(flume.Condition[Order]{
 })
 ```
 
+### Reducers (for Concurrent)
+Merge results from parallel execution:
+
+```go
+factory.AddReducer(flume.Reducer[Order]{
+    Name: "merge-enrichments",
+    Reducer: func(original Order, results map[pipz.Name]Order, errors map[pipz.Name]error) Order {
+        // Combine results from parallel branches
+        for _, result := range results {
+            original.Metadata = append(original.Metadata, result.Metadata...)
+        }
+        return original
+    },
+})
+```
+
+Used in concurrent nodes:
+```yaml
+type: concurrent
+reducer: merge-enrichments
+children:
+  - ref: enrich-from-api
+  - ref: enrich-from-cache
+```
+
+### Error Handlers (for Handle)
+Custom error processing pipelines:
+
+```go
+factory.AddErrorHandler(flume.ErrorHandler[Order]{
+    Name: "log-and-recover",
+    Handler: pipz.Transform("recover", func(ctx context.Context, e *pipz.Error[Order]) *pipz.Error[Order] {
+        log.Printf("Error processing order %s: %v", e.Data.ID, e.Err)
+        e.Err = nil // Clear error to continue processing
+        return e
+    }),
+})
+```
+
+Used in handle nodes:
+```yaml
+type: handle
+error_handler: log-and-recover
+child:
+  ref: risky-operation
+```
+
 ## Dynamic Schemas
 
 Register schemas that can be updated at runtime:
@@ -397,8 +444,9 @@ This pattern is useful for:
 ## Supported Connectors
 
 - **sequence**: Sequential processing
-- **concurrent**: Parallel execution (requires `Cloner[T]`)
+- **concurrent**: Parallel execution with optional reducer (requires `Cloner[T]`)
 - **race**: First successful result (requires `Cloner[T]`)
+- **contest**: Parallel execution, first to satisfy predicate wins (requires `Cloner[T]`)
 - **fallback**: Try primary, fall back on error
 - **retry**: Retry with configurable attempts
 - **timeout**: Enforce time limits
@@ -406,6 +454,9 @@ This pattern is useful for:
 - **rate-limit**: Rate limiting for controlling request throughput
 - **filter**: Conditional execution based on predicates
 - **switch**: Multi-way routing based on conditions
+- **handle**: Custom error handling with registered error handlers
+- **scaffold**: Execute children with shared setup/teardown
+- **worker-pool**: Bounded concurrent execution with configurable worker count
 - **stream**: Channel integration with optional continued processing
 
 ## Design Philosophy
