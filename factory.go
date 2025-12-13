@@ -327,33 +327,33 @@ func (f *Factory[T]) buildNode(node *Node, path string) (pipz.Chainable[T], erro
 
 	// Handle connector types
 	switch node.Type {
-	case "sequence":
+	case connectorSequence:
 		return f.buildSequence(node, path)
-	case "concurrent":
+	case connectorConcurrent:
 		return f.buildConcurrent(node, path)
-	case "race":
+	case connectorRace:
 		return f.buildRace(node, path)
-	case "fallback":
+	case connectorFallback:
 		return f.buildFallback(node, path)
-	case "retry":
+	case connectorRetry:
 		return f.buildRetry(node, path)
-	case "timeout":
+	case connectorTimeout:
 		return f.buildTimeout(node, path)
-	case "filter":
+	case connectorFilter:
 		return f.buildFilter(node, path)
-	case "switch":
+	case connectorSwitch:
 		return f.buildSwitch(node, path)
-	case "circuit-breaker":
+	case connectorCircuitBreaker:
 		return f.buildCircuitBreaker(node, path)
-	case "rate-limit":
+	case connectorRateLimit:
 		return f.buildRateLimit(node, path)
-	case "contest":
+	case connectorContest:
 		return f.buildContest(node, path)
-	case "handle":
+	case connectorHandle:
 		return f.buildHandle(node, path)
-	case "scaffold":
+	case connectorScaffold:
 		return f.buildScaffold(node, path)
-	case "worker-pool":
+	case connectorWorkerPool:
 		return f.buildWorkerPool(node, path)
 	default:
 		// Check if it's a stream reference

@@ -133,33 +133,33 @@ func (f *Factory[T]) validateNodeWithVisited(node *Node, path []string, errors *
 
 	// Validate connector type
 	switch node.Type {
-	case "sequence":
+	case connectorSequence:
 		f.validateSequence(node, path, errors, visitedRefs)
-	case "concurrent":
+	case connectorConcurrent:
 		f.validateConcurrent(node, path, errors, visitedRefs)
-	case "race":
+	case connectorRace:
 		f.validateRace(node, path, errors, visitedRefs)
-	case "fallback":
+	case connectorFallback:
 		f.validateFallback(node, path, errors, visitedRefs)
-	case "retry":
+	case connectorRetry:
 		f.validateRetry(node, path, errors, visitedRefs)
-	case "timeout":
+	case connectorTimeout:
 		f.validateTimeout(node, path, errors, visitedRefs)
-	case "filter":
+	case connectorFilter:
 		f.validateFilter(node, path, errors, visitedRefs)
-	case "switch":
+	case connectorSwitch:
 		f.validateSwitch(node, path, errors, visitedRefs)
-	case "circuit-breaker":
+	case connectorCircuitBreaker:
 		f.validateCircuitBreaker(node, path, errors, visitedRefs)
-	case "rate-limit":
+	case connectorRateLimit:
 		f.validateRateLimit(node, path, errors, visitedRefs)
-	case "contest":
+	case connectorContest:
 		f.validateContest(node, path, errors, visitedRefs)
-	case "handle":
+	case connectorHandle:
 		f.validateHandle(node, path, errors, visitedRefs)
-	case "scaffold":
+	case connectorScaffold:
 		f.validateScaffold(node, path, errors, visitedRefs)
-	case "worker-pool":
+	case connectorWorkerPool:
 		f.validateWorkerPool(node, path, errors, visitedRefs)
 	default:
 		*errors = append(*errors, ValidationError{
@@ -604,5 +604,410 @@ func (f *Factory[T]) validateWorkerPool(node *Node, path []string, errors *Valid
 	for i := range node.Children {
 		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
 		f.validateNodeWithVisited(&node.Children[i], childPath, errors, visitedRefs)
+	}
+}
+
+// ValidateSchemaStructure validates schema syntax without requiring registered components.
+// Use this for CI/CD schema linting where a configured factory is not available.
+// Returns nil if valid, or ValidationErrors containing all structural issues found.
+//
+// This validates:
+//   - Node structure (ref vs type exclusivity, non-empty nodes)
+//   - Connector constraints (required children, child counts)
+//   - Configuration values (valid durations, positive numbers)
+//   - Unknown node types
+//
+// This does NOT validate:
+//   - Processor references exist
+//   - Predicate references exist
+//   - Condition references exist
+//   - Reducer references exist
+//   - Error handler references exist
+//   - Channel references exist
+func ValidateSchemaStructure(schema Schema) error {
+	var errors ValidationErrors
+	validateNodeStructure(&schema.Node, []string{"root"}, &errors)
+
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+// validateNodeStructure recursively validates node structure without checking references.
+func validateNodeStructure(node *Node, path []string, errors *ValidationErrors) {
+	// Check for empty node
+	if node.Ref == "" && node.Type == "" && node.Stream == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "empty node - must have either ref, type, or stream",
+		})
+		return
+	}
+
+	// Check for conflicting ref and type
+	if node.Ref != "" && node.Type != "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "node cannot have both 'ref' and 'type'",
+		})
+		return
+	}
+
+	// Handle stream nodes
+	if node.Stream != "" {
+		validateStreamStructure(node, path, errors)
+		return
+	}
+
+	// Processor references are structurally valid (existence checked elsewhere)
+	if node.Ref != "" {
+		return
+	}
+
+	// Validate connector type structure
+	switch node.Type {
+	case connectorSequence:
+		validateSequenceStructure(node, path, errors)
+	case connectorConcurrent:
+		validateConcurrentStructure(node, path, errors)
+	case connectorRace:
+		validateRaceStructure(node, path, errors)
+	case connectorFallback:
+		validateFallbackStructure(node, path, errors)
+	case connectorRetry:
+		validateRetryStructure(node, path, errors)
+	case connectorTimeout:
+		validateTimeoutStructure(node, path, errors)
+	case connectorFilter:
+		validateFilterStructure(node, path, errors)
+	case connectorSwitch:
+		validateSwitchStructure(node, path, errors)
+	case connectorCircuitBreaker:
+		validateCircuitBreakerStructure(node, path, errors)
+	case connectorRateLimit:
+		validateRateLimitStructure(node, path, errors)
+	case connectorContest:
+		validateContestStructure(node, path, errors)
+	case connectorHandle:
+		validateHandleStructure(node, path, errors)
+	case connectorScaffold:
+		validateScaffoldStructure(node, path, errors)
+	case connectorWorkerPool:
+		validateWorkerPoolStructure(node, path, errors)
+	default:
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: fmt.Sprintf("unknown node type '%s'", node.Type),
+		})
+	}
+}
+
+func validateSequenceStructure(node *Node, path []string, errors *ValidationErrors) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "sequence requires at least one child",
+		})
+		return
+	}
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+}
+
+func validateConcurrentStructure(node *Node, path []string, errors *ValidationErrors) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "concurrent requires at least one child",
+		})
+		return
+	}
+	// Reducer reference is not validated here (existence checked elsewhere)
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+}
+
+func validateRaceStructure(node *Node, path []string, errors *ValidationErrors) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "race requires at least one child",
+		})
+		return
+	}
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+}
+
+func validateFallbackStructure(node *Node, path []string, errors *ValidationErrors) {
+	if len(node.Children) != 2 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "fallback requires exactly 2 children",
+		})
+		return
+	}
+	primaryPath := append(append([]string(nil), path...), "children[0](primary)")
+	validateNodeStructure(&node.Children[0], primaryPath, errors)
+	fallbackPath := append(append([]string(nil), path...), "children[1](fallback)")
+	validateNodeStructure(&node.Children[1], fallbackPath, errors)
+}
+
+func validateRetryStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "retry requires a child",
+		})
+		return
+	}
+	if node.Attempts < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    append(append([]string(nil), path...), "attempts"),
+			Message: "attempts must be positive",
+		})
+	}
+	if node.Backoff != "" {
+		if _, err := time.ParseDuration(node.Backoff); err != nil {
+			*errors = append(*errors, ValidationError{
+				Path:    append(append([]string(nil), path...), "backoff"),
+				Message: fmt.Sprintf("invalid backoff duration: %s", err),
+			})
+		}
+	}
+	childPath := append(append([]string(nil), path...), "child")
+	validateNodeStructure(node.Child, childPath, errors)
+}
+
+func validateTimeoutStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "timeout requires a child",
+		})
+		return
+	}
+	if node.Duration != "" {
+		if _, err := time.ParseDuration(node.Duration); err != nil {
+			*errors = append(*errors, ValidationError{
+				Path:    append(append([]string(nil), path...), "duration"),
+				Message: fmt.Sprintf("invalid duration: %s", err),
+			})
+		}
+	}
+	childPath := append(append([]string(nil), path...), "child")
+	validateNodeStructure(node.Child, childPath, errors)
+}
+
+func validateFilterStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Predicate == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "filter requires a predicate",
+		})
+	}
+	// Predicate reference is not validated here (existence checked elsewhere)
+	if node.Then == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "filter requires a 'then' branch",
+		})
+	} else {
+		thenPath := append(append([]string(nil), path...), "then")
+		validateNodeStructure(node.Then, thenPath, errors)
+	}
+	if node.Else != nil {
+		elsePath := append(append([]string(nil), path...), "else")
+		validateNodeStructure(node.Else, elsePath, errors)
+	}
+}
+
+func validateSwitchStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Condition == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "switch requires a condition",
+		})
+	}
+	// Condition reference is not validated here (existence checked elsewhere)
+	if len(node.Routes) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "switch requires at least one route",
+		})
+	} else {
+		for key := range node.Routes {
+			routePath := append(append([]string(nil), path...), fmt.Sprintf("routes.%s", key))
+			route := node.Routes[key]
+			validateNodeStructure(&route, routePath, errors)
+		}
+	}
+	if node.Default != nil {
+		defaultPath := append(append([]string(nil), path...), "default")
+		validateNodeStructure(node.Default, defaultPath, errors)
+	}
+}
+
+func validateCircuitBreakerStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "circuit-breaker requires a child",
+		})
+		return
+	}
+	if node.RecoveryTimeout != "" {
+		if _, err := time.ParseDuration(node.RecoveryTimeout); err != nil {
+			*errors = append(*errors, ValidationError{
+				Path:    path,
+				Message: fmt.Sprintf("invalid recovery timeout: %s", err),
+			})
+		}
+	}
+	childPath := append(append([]string(nil), path...), "child")
+	validateNodeStructure(node.Child, childPath, errors)
+}
+
+func validateRateLimitStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "rate-limit requires a child",
+		})
+		return
+	}
+	if node.RequestsPerSecond < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "requests_per_second must be non-negative",
+		})
+	}
+	if node.BurstSize < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "burst_size must be non-negative",
+		})
+	}
+	childPath := append(append([]string(nil), path...), "child")
+	validateNodeStructure(node.Child, childPath, errors)
+}
+
+func validateContestStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Predicate == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "contest requires a predicate",
+		})
+	}
+	// Predicate reference is not validated here (existence checked elsewhere)
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "contest requires at least one child",
+		})
+		return
+	}
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+}
+
+func validateHandleStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Child == nil {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "handle requires a child",
+		})
+		return
+	}
+	if node.ErrorHandler == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "handle requires an error_handler",
+		})
+	}
+	// Error handler reference is not validated here (existence checked elsewhere)
+	childPath := append(append([]string(nil), path...), "child")
+	validateNodeStructure(node.Child, childPath, errors)
+}
+
+func validateScaffoldStructure(node *Node, path []string, errors *ValidationErrors) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "scaffold requires at least one child",
+		})
+		return
+	}
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+}
+
+func validateWorkerPoolStructure(node *Node, path []string, errors *ValidationErrors) {
+	if len(node.Children) == 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "worker-pool requires at least one child",
+		})
+		return
+	}
+	if node.Workers < 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    append(append([]string(nil), path...), "workers"),
+			Message: "workers must be non-negative",
+		})
+	}
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+}
+
+func validateStreamStructure(node *Node, path []string, errors *ValidationErrors) {
+	if node.Stream == "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "stream node requires a stream name",
+		})
+		return
+	}
+	// Channel reference is not validated here (existence checked elsewhere)
+	if node.StreamTimeout != "" {
+		if _, err := time.ParseDuration(node.StreamTimeout); err != nil {
+			*errors = append(*errors, ValidationError{
+				Path:    append(append([]string(nil), path...), "stream_timeout"),
+				Message: fmt.Sprintf("invalid stream_timeout: %s", err),
+			})
+		}
+	}
+	if node.Child != nil && len(node.Children) > 0 {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "stream node has both 'child' and 'children' specified; prefer using only one",
+		})
+	}
+	if node.Child != nil {
+		childPath := append(append([]string(nil), path...), "child")
+		validateNodeStructure(node.Child, childPath, errors)
+	}
+	for i := range node.Children {
+		childPath := append(append([]string(nil), path...), fmt.Sprintf("children[%d]", i))
+		validateNodeStructure(&node.Children[i], childPath, errors)
+	}
+	if node.Type != "" || node.Ref != "" {
+		*errors = append(*errors, ValidationError{
+			Path:    path,
+			Message: "stream node should not have type or ref fields",
+		})
 	}
 }

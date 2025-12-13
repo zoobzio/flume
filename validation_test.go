@@ -637,3 +637,644 @@ ref: "proc1"`
 		t.Errorf("Expected empty version, got %s", retrieved.Version)
 	}
 }
+
+func TestValidateSchemaStructure(t *testing.T) {
+	tests := []struct {
+		name           string
+		schema         flume.Schema
+		expectedErrors []string
+	}{
+		{
+			name: "valid simple ref",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Ref: "any-processor", // Reference existence not checked
+				},
+			},
+			expectedErrors: []string{},
+		},
+		{
+			name: "valid sequence with refs",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{Ref: "proc1"},
+						{Ref: "proc2"},
+					},
+				},
+			},
+			expectedErrors: []string{},
+		},
+		{
+			name: "valid complex nested structure",
+			schema: flume.Schema{
+				Version: "1.0.0",
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{Ref: "validate"},
+						{
+							Type:      "filter",
+							Predicate: "is-valid", // Reference existence not checked
+							Then:      &flume.Node{Ref: "process"},
+							Else:      &flume.Node{Ref: "reject"},
+						},
+						{
+							Type:     "retry",
+							Attempts: 3,
+							Backoff:  "100ms",
+							Child:    &flume.Node{Ref: "save"},
+						},
+					},
+				},
+			},
+			expectedErrors: []string{},
+		},
+		{
+			name: "empty node",
+			schema: flume.Schema{
+				Node: flume.Node{},
+			},
+			expectedErrors: []string{
+				"empty node - must have either ref, type, or stream",
+			},
+		},
+		{
+			name: "both ref and type",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Ref:  "proc",
+					Type: "sequence",
+				},
+			},
+			expectedErrors: []string{
+				"node cannot have both 'ref' and 'type'",
+			},
+		},
+		{
+			name: "unknown node type",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "unknown-type",
+				},
+			},
+			expectedErrors: []string{
+				"unknown node type 'unknown-type'",
+			},
+		},
+		{
+			name: "sequence without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+				},
+			},
+			expectedErrors: []string{
+				"sequence requires at least one child",
+			},
+		},
+		{
+			name: "concurrent without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "concurrent",
+				},
+			},
+			expectedErrors: []string{
+				"concurrent requires at least one child",
+			},
+		},
+		{
+			name: "race without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "race",
+				},
+			},
+			expectedErrors: []string{
+				"race requires at least one child",
+			},
+		},
+		{
+			name: "fallback with wrong child count",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "fallback",
+					Children: []flume.Node{
+						{Ref: "only-one"},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"fallback requires exactly 2 children",
+			},
+		},
+		{
+			name: "retry without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "retry",
+				},
+			},
+			expectedErrors: []string{
+				"retry requires a child",
+			},
+		},
+		{
+			name: "retry with negative attempts",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:     "retry",
+					Attempts: -1,
+					Child:    &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"attempts must be positive",
+			},
+		},
+		{
+			name: "retry with invalid backoff",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "retry",
+					Backoff: "invalid",
+					Child:   &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"invalid backoff duration",
+			},
+		},
+		{
+			name: "timeout without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "timeout",
+				},
+			},
+			expectedErrors: []string{
+				"timeout requires a child",
+			},
+		},
+		{
+			name: "timeout with invalid duration",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:     "timeout",
+					Duration: "not-a-duration",
+					Child:    &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"invalid duration",
+			},
+		},
+		{
+			name: "filter without predicate",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "filter",
+					Then: &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"filter requires a predicate",
+			},
+		},
+		{
+			name: "filter without then",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "filter",
+					Predicate: "check",
+				},
+			},
+			expectedErrors: []string{
+				"filter requires a 'then' branch",
+			},
+		},
+		{
+			name: "switch without condition",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "switch",
+					Routes: map[string]flume.Node{
+						"a": {Ref: "proc"},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"switch requires a condition",
+			},
+		},
+		{
+			name: "switch without routes",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "switch",
+					Condition: "route",
+				},
+			},
+			expectedErrors: []string{
+				"switch requires at least one route",
+			},
+		},
+		{
+			name: "circuit-breaker without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "circuit-breaker",
+				},
+			},
+			expectedErrors: []string{
+				"circuit-breaker requires a child",
+			},
+		},
+		{
+			name: "circuit-breaker with invalid recovery timeout",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:            "circuit-breaker",
+					RecoveryTimeout: "bad",
+					Child:           &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"invalid recovery timeout",
+			},
+		},
+		{
+			name: "rate-limit without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "rate-limit",
+				},
+			},
+			expectedErrors: []string{
+				"rate-limit requires a child",
+			},
+		},
+		{
+			name: "rate-limit with negative rps",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:              "rate-limit",
+					RequestsPerSecond: -1,
+					Child:             &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"requests_per_second must be non-negative",
+			},
+		},
+		{
+			name: "rate-limit with negative burst",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "rate-limit",
+					BurstSize: -1,
+					Child:     &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"burst_size must be non-negative",
+			},
+		},
+		{
+			name: "contest without predicate",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "contest",
+					Children: []flume.Node{
+						{Ref: "proc"},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"contest requires a predicate",
+			},
+		},
+		{
+			name: "contest without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "contest",
+					Predicate: "check",
+				},
+			},
+			expectedErrors: []string{
+				"contest requires at least one child",
+			},
+		},
+		{
+			name: "handle without child",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:         "handle",
+					ErrorHandler: "handler",
+				},
+			},
+			expectedErrors: []string{
+				"handle requires a child",
+			},
+		},
+		{
+			name: "handle without error handler",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:  "handle",
+					Child: &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{
+				"handle requires an error_handler",
+			},
+		},
+		{
+			name: "scaffold without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "scaffold",
+				},
+			},
+			expectedErrors: []string{
+				"scaffold requires at least one child",
+			},
+		},
+		{
+			name: "worker-pool without children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "worker-pool",
+				},
+			},
+			expectedErrors: []string{
+				"worker-pool requires at least one child",
+			},
+		},
+		{
+			name: "worker-pool with negative workers",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "worker-pool",
+					Workers: -1,
+					Children: []flume.Node{
+						{Ref: "proc"},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"workers must be non-negative",
+			},
+		},
+		{
+			name: "stream with invalid timeout",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream:        "output",
+					StreamTimeout: "bad-duration",
+				},
+			},
+			expectedErrors: []string{
+				"invalid stream_timeout",
+			},
+		},
+		{
+			name: "stream with both child and children",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "output",
+					Child:  &flume.Node{Ref: "proc1"},
+					Children: []flume.Node{
+						{Ref: "proc2"},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"stream node has both 'child' and 'children' specified",
+			},
+		},
+		{
+			name: "stream with type field",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "output",
+					Type:   "sequence",
+				},
+			},
+			expectedErrors: []string{
+				"stream node should not have type or ref fields",
+			},
+		},
+		{
+			name: "multiple structural errors",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{}, // empty
+						{
+							Type: "retry",
+							// missing child - returns early, doesn't check attempts
+						},
+						{
+							Type:     "timeout",
+							Duration: "bad",
+							Child:    &flume.Node{Ref: "proc"},
+						},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"empty node",
+				"retry requires a child",
+				"invalid duration",
+			},
+		},
+		{
+			name: "nested errors in routes",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "switch",
+					Condition: "route",
+					Routes: map[string]flume.Node{
+						"a": {
+							Type: "sequence",
+							// missing children
+						},
+					},
+				},
+			},
+			expectedErrors: []string{
+				"sequence requires at least one child",
+			},
+		},
+		{
+			name: "does not check processor references",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{Ref: "nonexistent-processor-1"},
+						{Ref: "nonexistent-processor-2"},
+					},
+				},
+			},
+			expectedErrors: []string{}, // No errors - refs are not validated
+		},
+		{
+			name: "does not check predicate references",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "filter",
+					Predicate: "nonexistent-predicate",
+					Then:      &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{}, // No errors - predicate refs are not validated
+		},
+		{
+			name: "does not check condition references",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:      "switch",
+					Condition: "nonexistent-condition",
+					Routes: map[string]flume.Node{
+						"a": {Ref: "proc"},
+					},
+				},
+			},
+			expectedErrors: []string{}, // No errors - condition refs are not validated
+		},
+		{
+			name: "does not check reducer references",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:    "concurrent",
+					Reducer: "nonexistent-reducer",
+					Children: []flume.Node{
+						{Ref: "proc"},
+					},
+				},
+			},
+			expectedErrors: []string{}, // No errors - reducer refs are not validated
+		},
+		{
+			name: "does not check error handler references",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Type:         "handle",
+					ErrorHandler: "nonexistent-handler",
+					Child:        &flume.Node{Ref: "proc"},
+				},
+			},
+			expectedErrors: []string{}, // No errors - error handler refs are not validated
+		},
+		{
+			name: "does not check channel references",
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "nonexistent-channel",
+				},
+			},
+			expectedErrors: []string{}, // No errors - channel refs are not validated
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := flume.ValidateSchemaStructure(tt.schema)
+
+			if len(tt.expectedErrors) == 0 {
+				if err != nil {
+					t.Errorf("Expected no errors, got: %v", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Errorf("Expected errors but got none")
+				return
+			}
+
+			errStr := err.Error()
+			for _, expected := range tt.expectedErrors {
+				if !strings.Contains(errStr, expected) {
+					t.Errorf("Expected error containing '%s', got: %v", expected, err)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateSchemaStructureComplexValid(t *testing.T) {
+	// Test a complex but structurally valid schema
+	schema := flume.Schema{
+		Version: "1.0.0",
+		Node: flume.Node{
+			Type: "sequence",
+			Children: []flume.Node{
+				{Ref: "validate"},
+				{
+					Type:      "filter",
+					Predicate: "is-valid",
+					Then:      &flume.Node{Ref: "process"},
+					Else: &flume.Node{
+						Type:     "retry",
+						Attempts: 3,
+						Backoff:  "100ms",
+						Child:    &flume.Node{Ref: "fallback-process"},
+					},
+				},
+				{
+					Type:     "timeout",
+					Duration: "5s",
+					Child: &flume.Node{
+						Type: "circuit-breaker",
+						Child: &flume.Node{
+							Type:              "rate-limit",
+							RequestsPerSecond: 10,
+							BurstSize:         5,
+							Child:             &flume.Node{Ref: "save"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := flume.ValidateSchemaStructure(schema)
+	if err != nil {
+		t.Errorf("Expected valid schema structure, got: %v", err)
+	}
+}
+
+func TestValidateSchemaStructureVsValidateSchema(t *testing.T) {
+	// Demonstrate the difference between structural and full validation
+	schema := flume.Schema{
+		Node: flume.Node{
+			Type: "sequence",
+			Children: []flume.Node{
+				{Ref: "nonexistent-processor"},
+			},
+		},
+	}
+
+	// Structural validation passes (doesn't check references)
+	err := flume.ValidateSchemaStructure(schema)
+	if err != nil {
+		t.Errorf("ValidateSchemaStructure should pass for structurally valid schema: %v", err)
+	}
+
+	// Full validation fails (processor not registered)
+	factory := flume.New[TestData]()
+	err = factory.ValidateSchema(schema)
+	if err == nil {
+		t.Error("ValidateSchema should fail for missing processor")
+	}
+	if !strings.Contains(err.Error(), "processor 'nonexistent-processor' not found") {
+		t.Errorf("Expected processor not found error, got: %v", err)
+	}
+}

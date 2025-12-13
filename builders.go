@@ -16,6 +16,8 @@ const (
 	connectorFallback       = "fallback"
 	connectorRetry          = "retry"
 	connectorTimeout        = "timeout"
+	connectorFilter         = "filter"
+	connectorSwitch         = "switch"
 	connectorCircuitBreaker = "circuit-breaker"
 	connectorRateLimit      = "rate-limit"
 	connectorContest        = "contest"

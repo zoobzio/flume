@@ -51,7 +51,6 @@ coverage:
 
 # Files to ignore in coverage
 ignore:
-  - "examples/**/*"      # Example applications
   - "**/*_test.go"      # Test files themselves
   - "**/mock_*.go"      # Mock files
   - "**/testdata/**"    # Test data
@@ -82,7 +81,6 @@ component_management:
       paths:
         - "*.go"
         - "!*_test.go"
-        - "!examples/**"
 
     - component_id: factory
       name: Factory
@@ -108,8 +106,6 @@ component_management:
 flags:
   # Unit tests
   unit:
-    paths:
-      - "!examples/**"
     carryforward: true
 
 # GitHub Checks

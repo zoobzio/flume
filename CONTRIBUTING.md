@@ -121,8 +121,7 @@ flume/
 ├── loader.go         # File/JSON/YAML loading
 ├── observability.go  # Event emission
 ├── spec.go           # Factory introspection
-├── *_test.go         # Tests
-└── examples/         # Example implementations
+└── *_test.go         # Tests
 ```
 
 ## Commit Messages
