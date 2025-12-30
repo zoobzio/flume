@@ -57,7 +57,7 @@ func (f *Factory[T]) buildSequence(node *Node, path string) (pipz.Chainable[T], 
 		name = connectorSequence
 	}
 
-	return pipz.NewSequence(pipz.Name(name), children...), nil //nolint:unconvert
+	return pipz.NewSequence(f.internalIdentity(name), children...), nil
 }
 
 // buildConcurrent creates a concurrent connector from schema.
@@ -81,16 +81,16 @@ func (f *Factory[T]) buildConcurrent(node *Node, path string) (pipz.Chainable[T]
 	}
 
 	// Get reducer if specified
-	var reducer func(original T, results map[pipz.Name]T, errors map[pipz.Name]error) T
+	var reducer func(original T, results map[pipz.Identity]T, errors map[pipz.Identity]error) T
 	if node.Reducer != "" {
-		rm, exists := f.reducers[pipz.Name(node.Reducer)] //nolint:unconvert
+		rm, exists := f.reducers[node.Reducer]
 		if !exists {
 			return nil, fmt.Errorf("%s: reducer '%s' not found", path, node.Reducer)
 		}
 		reducer = rm.reducer
 	}
 
-	return pipz.NewConcurrent[T](pipz.Name(name), reducer, children...), nil //nolint:unconvert
+	return pipz.NewConcurrent[T](f.internalIdentity(name), reducer, children...), nil
 }
 
 // buildRace creates a race connector from schema.
@@ -113,7 +113,7 @@ func (f *Factory[T]) buildRace(node *Node, path string) (pipz.Chainable[T], erro
 		name = connectorRace
 	}
 
-	return pipz.NewRace[T](pipz.Name(name), children...), nil //nolint:unconvert
+	return pipz.NewRace[T](f.internalIdentity(name), children...), nil
 }
 
 // buildFallback creates a fallback connector from schema.
@@ -137,7 +137,7 @@ func (f *Factory[T]) buildFallback(node *Node, path string) (pipz.Chainable[T], 
 		name = connectorFallback
 	}
 
-	return pipz.NewFallback(pipz.Name(name), primary, fallback), nil //nolint:unconvert
+	return pipz.NewFallback(f.internalIdentity(name), primary, fallback), nil
 }
 
 // buildRetry creates a retry connector from schema.
@@ -174,7 +174,7 @@ func (f *Factory[T]) buildRetry(node *Node, path string) (pipz.Chainable[T], err
 			attempts = DefaultRetryAttempts
 		}
 
-		return pipz.NewBackoff(pipz.Name(name), child, attempts, backoff), nil //nolint:unconvert
+		return pipz.NewBackoff(f.internalIdentity(name), child, attempts, backoff), nil
 	}
 
 	// Use attempts field, default to DefaultRetryAttempts if not specified
@@ -183,7 +183,7 @@ func (f *Factory[T]) buildRetry(node *Node, path string) (pipz.Chainable[T], err
 		attempts = DefaultRetryAttempts
 	}
 
-	return pipz.NewRetry(pipz.Name(name), child, attempts), nil //nolint:unconvert
+	return pipz.NewRetry(f.internalIdentity(name), child, attempts), nil
 }
 
 // buildTimeout creates a timeout connector from schema.
@@ -212,7 +212,7 @@ func (f *Factory[T]) buildTimeout(node *Node, path string) (pipz.Chainable[T], e
 		duration = parsed
 	}
 
-	return pipz.NewTimeout(pipz.Name(name), child, duration), nil //nolint:unconvert
+	return pipz.NewTimeout(f.internalIdentity(name), child, duration), nil
 }
 
 // buildFilter creates a filter connector from schema.
@@ -224,7 +224,7 @@ func (f *Factory[T]) buildFilter(node *Node, path string) (pipz.Chainable[T], er
 		return nil, fmt.Errorf("%s: filter requires a then branch", path)
 	}
 
-	pm, exists := f.predicates[pipz.Name(node.Predicate)] //nolint:unconvert
+	pm, exists := f.predicates[node.Predicate]
 	if !exists {
 		return nil, fmt.Errorf("%s: predicate '%s' not found", path, node.Predicate)
 	}
@@ -242,7 +242,7 @@ func (f *Factory[T]) buildFilter(node *Node, path string) (pipz.Chainable[T], er
 
 	// If no else branch, data passes through unchanged when predicate is false
 	if node.Else == nil {
-		return pipz.NewFilter[T](pipz.Name(name), predicate, then), nil //nolint:unconvert
+		return pipz.NewFilter[T](f.internalIdentity(name), predicate, then), nil
 	}
 
 	// Build else branch and create a custom filter
@@ -252,7 +252,7 @@ func (f *Factory[T]) buildFilter(node *Node, path string) (pipz.Chainable[T], er
 	}
 
 	// Create a processor that routes based on the predicate
-	return pipz.Apply(pipz.Name(name), func(ctx context.Context, data T) (T, error) { //nolint:unconvert
+	return pipz.Apply(f.internalIdentity(name), func(ctx context.Context, data T) (T, error) {
 		if predicate(ctx, data) {
 			return then.Process(ctx, data)
 		}
@@ -269,7 +269,7 @@ func (f *Factory[T]) buildSwitch(node *Node, path string) (pipz.Chainable[T], er
 		return nil, fmt.Errorf("%s: switch requires at least one route", path)
 	}
 
-	cm, exists := f.conditions[pipz.Name(node.Condition)] //nolint:unconvert
+	cm, exists := f.conditions[node.Condition]
 	if !exists {
 		return nil, fmt.Errorf("%s: condition '%s' not found", path, node.Condition)
 	}
@@ -292,7 +292,7 @@ func (f *Factory[T]) buildSwitch(node *Node, path string) (pipz.Chainable[T], er
 	}
 
 	// Create switch
-	sw := pipz.NewSwitch(pipz.Name(name), condition) //nolint:unconvert
+	sw := pipz.NewSwitch(f.internalIdentity(name), condition)
 	for key, route := range routes {
 		sw.AddRoute(key, route)
 	}
@@ -343,7 +343,7 @@ func (f *Factory[T]) buildCircuitBreaker(node *Node, path string) (pipz.Chainabl
 		recoveryTimeout = parsed
 	}
 
-	return pipz.NewCircuitBreaker(pipz.Name(name), child, failureThreshold, recoveryTimeout), nil //nolint:unconvert
+	return pipz.NewCircuitBreaker(f.internalIdentity(name), child, failureThreshold, recoveryTimeout), nil
 }
 
 // buildRateLimit creates a rate limiter connector from schema.
@@ -374,10 +374,7 @@ func (f *Factory[T]) buildRateLimit(node *Node, path string) (pipz.Chainable[T],
 		burstSize = DefaultBurstSize
 	}
 
-	// Create a sequence that chains rate limiter with the child
-	rateLimiter := pipz.NewRateLimiter[T](pipz.Name(name+"_limiter"), requestsPerSecond, burstSize) //nolint:unconvert
-	sequence := pipz.NewSequence(pipz.Name(name), rateLimiter, child)                               //nolint:unconvert
-	return sequence, nil
+	return pipz.NewRateLimiter[T](f.internalIdentity(name), requestsPerSecond, burstSize, child), nil
 }
 
 // buildStream creates a stream effect from schema that can optionally continue processing.
@@ -401,10 +398,12 @@ func (f *Factory[T]) buildStream(node *Node, path string) (pipz.Chainable[T], er
 		streamTimeout = parsed
 	}
 
+	streamName := fmt.Sprintf("stream:%s", node.Stream)
+
 	// Create the effect that pushes to channel
 	var streamEffect pipz.Chainable[T]
 	if streamTimeout > 0 {
-		streamEffect = pipz.Effect(pipz.Name(fmt.Sprintf("stream:%s", node.Stream)), func(ctx context.Context, item T) error { //nolint:unconvert
+		streamEffect = pipz.Effect(f.internalIdentity(streamName), func(ctx context.Context, item T) error {
 			select {
 			case channel <- item:
 				return nil
@@ -415,7 +414,7 @@ func (f *Factory[T]) buildStream(node *Node, path string) (pipz.Chainable[T], er
 			}
 		})
 	} else {
-		streamEffect = pipz.Effect(pipz.Name(fmt.Sprintf("stream:%s", node.Stream)), func(ctx context.Context, item T) error { //nolint:unconvert
+		streamEffect = pipz.Effect(f.internalIdentity(streamName), func(ctx context.Context, item T) error {
 			select {
 			case channel <- item:
 				return nil
@@ -453,10 +452,10 @@ func (f *Factory[T]) buildStream(node *Node, path string) (pipz.Chainable[T], er
 
 	name := node.Name
 	if name == "" {
-		name = fmt.Sprintf("stream:%s", node.Stream)
+		name = streamName
 	}
 
-	return pipz.NewSequence(pipz.Name(name), children...), nil //nolint:unconvert
+	return pipz.NewSequence(f.internalIdentity(name), children...), nil
 }
 
 // buildContest creates a contest connector from schema.
@@ -468,7 +467,7 @@ func (f *Factory[T]) buildContest(node *Node, path string) (pipz.Chainable[T], e
 		return nil, fmt.Errorf("%s: contest requires a predicate", path)
 	}
 
-	pm, exists := f.predicates[pipz.Name(node.Predicate)] //nolint:unconvert
+	pm, exists := f.predicates[node.Predicate]
 	if !exists {
 		return nil, fmt.Errorf("%s: predicate '%s' not found", path, node.Predicate)
 	}
@@ -488,7 +487,7 @@ func (f *Factory[T]) buildContest(node *Node, path string) (pipz.Chainable[T], e
 		name = fmt.Sprintf("contest-%s", node.Predicate)
 	}
 
-	return pipz.NewContest[T](pipz.Name(name), predicate, children...), nil //nolint:unconvert
+	return pipz.NewContest[T](f.internalIdentity(name), predicate, children...), nil
 }
 
 // buildHandle creates a handle connector from schema.
@@ -500,7 +499,7 @@ func (f *Factory[T]) buildHandle(node *Node, path string) (pipz.Chainable[T], er
 		return nil, fmt.Errorf("%s: handle requires an error_handler", path)
 	}
 
-	hm, exists := f.errorHandlers[pipz.Name(node.ErrorHandler)] //nolint:unconvert
+	hm, exists := f.errorHandlers[node.ErrorHandler]
 	if !exists {
 		return nil, fmt.Errorf("%s: error handler '%s' not found", path, node.ErrorHandler)
 	}
@@ -516,7 +515,7 @@ func (f *Factory[T]) buildHandle(node *Node, path string) (pipz.Chainable[T], er
 		name = fmt.Sprintf("handle-%s", node.ErrorHandler)
 	}
 
-	return pipz.NewHandle(pipz.Name(name), child, handler), nil //nolint:unconvert
+	return pipz.NewHandle(f.internalIdentity(name), child, handler), nil
 }
 
 // buildScaffold creates a scaffold connector from schema.
@@ -539,7 +538,7 @@ func (f *Factory[T]) buildScaffold(node *Node, path string) (pipz.Chainable[T], 
 		name = connectorScaffold
 	}
 
-	return pipz.NewScaffold[T](pipz.Name(name), children...), nil //nolint:unconvert
+	return pipz.NewScaffold[T](f.internalIdentity(name), children...), nil
 }
 
 // buildWorkerPool creates a worker pool connector from schema.
@@ -567,5 +566,5 @@ func (f *Factory[T]) buildWorkerPool(node *Node, path string) (pipz.Chainable[T]
 		workers = DefaultWorkerCount
 	}
 
-	return pipz.NewWorkerPool[T](pipz.Name(name), workers, children...), nil //nolint:unconvert
+	return pipz.NewWorkerPool[T](f.internalIdentity(name), workers, children...), nil
 }

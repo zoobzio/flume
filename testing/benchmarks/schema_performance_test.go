@@ -18,8 +18,8 @@ func BenchmarkSchemaParsingYAML(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 100; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -92,8 +92,8 @@ func BenchmarkSchemaParsingJSON(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 100; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -156,21 +156,21 @@ func BenchmarkComplexSchemas(b *testing.B) {
 
 	// Register processors and predicates
 	for i := 0; i < 20; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
 
 	factory.AddPredicate(flume.Predicate[flumetesting.TestData]{
-		Name: "is-valid",
+		Identity: factory.Identity("is-valid", "Validates data ID is positive"),
 		Predicate: func(_ context.Context, d flumetesting.TestData) bool {
 			return d.ID > 0
 		},
 	})
 
 	factory.AddCondition(flume.Condition[flumetesting.TestData]{
-		Name: "get-type",
+		Identity: factory.Identity("get-type", "Returns high/low based on value"),
 		Condition: func(_ context.Context, d flumetesting.TestData) string {
 			if d.Value > 100 {
 				return "high"
@@ -315,14 +315,14 @@ func BenchmarkNestedSchemas(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 50; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
 
 	factory.AddPredicate(flume.Predicate[flumetesting.TestData]{
-		Name: "predicate",
+		Identity: factory.Identity("predicate", "Always-true benchmark predicate"),
 		Predicate: func(_ context.Context, _ flumetesting.TestData) bool {
 			return true
 		},
@@ -406,8 +406,8 @@ func BenchmarkSchemaValidation(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 100; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -434,29 +434,31 @@ func BenchmarkSchemaValidation(b *testing.B) {
 		}
 	})
 
-	b.Run("SetSchema", func(b *testing.B) {
+	b.Run("Bind", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = factory.SetSchema(fmt.Sprintf("pipeline-%d", i), schema)
+			id := factory.Identity(fmt.Sprintf("pipeline-%d", i), fmt.Sprintf("Benchmark pipeline %d", i))
+			_, _ = factory.Bind(id, schema)
 		}
 	})
 }
 
-// BenchmarkSchemaRetrieval measures schema retrieval performance.
-func BenchmarkSchemaRetrieval(b *testing.B) {
+// BenchmarkBindingRetrieval measures binding retrieval performance.
+func BenchmarkBindingRetrieval(b *testing.B) {
 	factory := flume.New[flumetesting.TestData]()
 
 	// Register processors
 	for i := 0; i < 10; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
 
-	// Register 100 schemas
+	// Register 100 bindings
+	bindings := make([]*flume.Binding[flumetesting.TestData], 100)
 	for i := 0; i < 100; i++ {
 		schema := flume.Schema{
 			Version: fmt.Sprintf("%d.0.0", i),
@@ -464,42 +466,41 @@ func BenchmarkSchemaRetrieval(b *testing.B) {
 				Ref: fmt.Sprintf("processor-%d", i%10),
 			},
 		}
-		_ = factory.SetSchema(fmt.Sprintf("schema-%d", i), schema)
+		id := factory.Identity(fmt.Sprintf("schema-%d", i), fmt.Sprintf("Benchmark schema %d", i))
+		bindings[i], _ = factory.Bind(id, schema)
 	}
 
-	b.Run("GetSchema_Hit", func(b *testing.B) {
+	id50 := factory.Identity("schema-50", "Benchmark schema 50")
+	idMissing := factory.Identity("nonexistent", "Non-existent binding for benchmark")
+
+	b.Run("Get_Hit", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_, _ = factory.GetSchema("schema-50")
+			_ = factory.Get(id50)
 		}
 	})
 
-	b.Run("GetSchema_Miss", func(b *testing.B) {
+	b.Run("Get_Miss", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_, _ = factory.GetSchema("nonexistent")
+			_ = factory.Get(idMissing)
 		}
 	})
 
-	b.Run("Pipeline_Hit", func(b *testing.B) {
+	b.Run("Binding_Process", func(b *testing.B) {
+		binding := bindings[50]
+		ctx := context.Background()
+		input := flumetesting.TestData{ID: 1}
+
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_, _ = factory.Pipeline("schema-50")
-		}
-	})
-
-	b.Run("ListSchemas", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			_ = factory.ListSchemas()
+			_, _ = binding.Process(ctx, input)
 		}
 	})
 }
@@ -509,8 +510,8 @@ func BenchmarkYAMLvsJSON(b *testing.B) {
 	factory := flume.New[flumetesting.TestData]()
 
 	for i := 0; i < 10; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -555,24 +556,30 @@ children:
 	})
 }
 
-// BenchmarkConcurrentSchemaAccess measures concurrent schema operations.
-func BenchmarkConcurrentSchemaAccess(b *testing.B) {
+// BenchmarkConcurrentBindingAccess measures concurrent binding operations.
+func BenchmarkConcurrentBindingAccess(b *testing.B) {
 	factory := flume.New[flumetesting.TestData]()
 
 	for i := 0; i < 10; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
 
-	// Pre-register some schemas
+	// Pre-register some bindings
+	bindings := make([]*flume.Binding[flumetesting.TestData], 50)
 	for i := 0; i < 50; i++ {
 		schema := flume.Schema{
 			Node: flume.Node{Ref: fmt.Sprintf("processor-%d", i%10)},
 		}
-		_ = factory.SetSchema(fmt.Sprintf("schema-%d", i), schema)
+		id := factory.Identity(fmt.Sprintf("schema-%d", i), fmt.Sprintf("Benchmark schema %d", i))
+		bindings[i], _ = factory.Bind(id, schema)
 	}
+
+	id25 := factory.Identity("schema-25", "Benchmark schema 25")
+	ctx := context.Background()
+	input := flumetesting.TestData{ID: 1}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -583,17 +590,18 @@ func BenchmarkConcurrentSchemaAccess(b *testing.B) {
 		for pb.Next() {
 			switch {
 			case i%10 == 0:
-				// Write: set new schema
+				// Write: bind new schema
 				schema := flume.Schema{
 					Node: flume.Node{Ref: fmt.Sprintf("processor-%d", i%10)},
 				}
-				_ = factory.SetSchema(fmt.Sprintf("parallel-schema-%d", i), schema)
+				id := factory.Identity(fmt.Sprintf("parallel-schema-%d", i), fmt.Sprintf("Parallel schema %d", i))
+				_, _ = factory.Bind(id, schema)
 			case i%5 == 0:
-				// Read: list schemas
-				_ = factory.ListSchemas()
+				// Read: get binding
+				_ = factory.Get(id25)
 			default:
-				// Read: get pipeline
-				_, _ = factory.Pipeline("schema-25")
+				// Process: use binding
+				_, _ = bindings[25].Process(ctx, input)
 			}
 			i++
 		}

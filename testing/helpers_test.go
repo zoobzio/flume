@@ -465,8 +465,8 @@ func TestNewMockProcessor(t *testing.T) {
 	if mock == nil {
 		t.Fatal("expected non-nil mock")
 	}
-	if mock.Name() != "test-mock" {
-		t.Errorf("expected name='test-mock', got %q", mock.Name())
+	if mock.Identity().Name() != "test-mock" {
+		t.Errorf("expected name='test-mock', got %q", mock.Identity().Name())
 	}
 	if mock.CallCount() != 0 {
 		t.Error("expected initial call count=0")

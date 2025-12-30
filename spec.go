@@ -210,9 +210,14 @@ func (f *Factory[T]) Spec() FactorySpec {
 	}
 
 	for name, pm := range f.processors {
+		// Get description from the processor's identity if available
+		description := ""
+		if pm.processor != nil {
+			description = pm.processor.Identity().Description()
+		}
 		spec.Processors = append(spec.Processors, ProcessorSpec{
-			Name:        string(name),
-			Description: pm.description,
+			Name:        name,
+			Description: description,
 			Tags:        pm.tags,
 		})
 	}
@@ -220,16 +225,16 @@ func (f *Factory[T]) Spec() FactorySpec {
 
 	for name, pm := range f.predicates {
 		spec.Predicates = append(spec.Predicates, PredicateSpec{
-			Name:        string(name),
-			Description: pm.description,
+			Name:        name,
+			Description: pm.identity.Description(),
 		})
 	}
 	sortPredicates(spec.Predicates)
 
 	for name, cm := range f.conditions {
 		spec.Conditions = append(spec.Conditions, ConditionSpec{
-			Name:        string(name),
-			Description: cm.description,
+			Name:        name,
+			Description: cm.identity.Description(),
 			Values:      cm.values,
 		})
 	}

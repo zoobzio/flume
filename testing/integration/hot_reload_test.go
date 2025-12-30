@@ -15,23 +15,28 @@ import (
 func TestHotReload_BasicSchemaUpdate(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	v1ProcessorID := factory.Identity("processor-v1", "Version 1 processor that prefixes name with v1")
+	v2ProcessorID := factory.Identity("processor-v2", "Version 2 processor that prefixes name with v2")
+	pipelineID := factory.Identity("my-pipeline", "Pipeline for basic schema update test")
+
 	// Register processors
 	var v1Calls, v2Calls int64
 
 	factory.Add(
-		pipz.Transform("processor-v1", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(v1ProcessorID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			atomic.AddInt64(&v1Calls, 1)
 			d.Name = "v1-" + d.Name
 			return d
 		}),
-		pipz.Transform("processor-v2", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(v2ProcessorID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			atomic.AddInt64(&v2Calls, 1)
 			d.Name = "v2-" + d.Name
 			return d
 		}),
 	)
 
-	// Set initial schema
+	// Set initial schema via Bind
 	schemaV1 := flume.Schema{
 		Version: "1.0.0",
 		Node: flume.Node{
@@ -39,30 +44,24 @@ func TestHotReload_BasicSchemaUpdate(t *testing.T) {
 		},
 	}
 
-	err := factory.SetSchema("my-pipeline", schemaV1)
+	binding, err := factory.Bind(pipelineID, schemaV1)
 	if err != nil {
-		t.Fatalf("failed to set schema v1: %v", err)
-	}
-
-	// Get and use pipeline
-	pipeline, ok := factory.Pipeline("my-pipeline")
-	if !ok {
-		t.Fatal("failed to get pipeline")
+		t.Fatalf("failed to bind schema v1: %v", err)
 	}
 
 	ctx := context.Background()
 	input := flumetesting.TestData{ID: 1, Name: "test"}
 
-	result, err := pipeline.Process(ctx, input)
-	if err != nil {
-		t.Fatalf("v1 processing failed: %v", err)
+	result, pErr := binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v1 processing failed: %v", pErr)
 	}
 
 	if result.Name != "v1-test" {
 		t.Errorf("expected 'v1-test', got %q", result.Name)
 	}
 
-	// Update schema
+	// Update schema via binding.Update
 	schemaV2 := flume.Schema{
 		Version: "2.0.0",
 		Node: flume.Node{
@@ -70,20 +69,14 @@ func TestHotReload_BasicSchemaUpdate(t *testing.T) {
 		},
 	}
 
-	err = factory.SetSchema("my-pipeline", schemaV2)
+	err = binding.Update(schemaV2)
 	if err != nil {
-		t.Fatalf("failed to set schema v2: %v", err)
+		t.Fatalf("failed to update to schema v2: %v", err)
 	}
 
-	// Get updated pipeline
-	pipeline, ok = factory.Pipeline("my-pipeline")
-	if !ok {
-		t.Fatal("failed to get updated pipeline")
-	}
-
-	result, err = pipeline.Process(ctx, input)
-	if err != nil {
-		t.Fatalf("v2 processing failed: %v", err)
+	result, pErr = binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v2 processing failed: %v", pErr)
 	}
 
 	if result.Name != "v2-test" {
@@ -102,9 +95,13 @@ func TestHotReload_BasicSchemaUpdate(t *testing.T) {
 func TestHotReload_ConcurrentAccess(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	processorID := factory.Identity("processor", "Simple processor for concurrent access testing")
+	pipelineID := factory.Identity("concurrent-pipeline", "Pipeline for concurrent access test")
+
 	var callCount int64
 
-	factory.Add(pipz.Transform("processor", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	factory.Add(pipz.Transform(processorID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		atomic.AddInt64(&callCount, 1)
 		return d
 	}))
@@ -113,9 +110,9 @@ func TestHotReload_ConcurrentAccess(t *testing.T) {
 		Node: flume.Node{Ref: "processor"},
 	}
 
-	err := factory.SetSchema("concurrent-pipeline", schema)
+	binding, err := factory.Bind(pipelineID, schema)
 	if err != nil {
-		t.Fatalf("failed to set schema: %v", err)
+		t.Fatalf("failed to bind schema: %v", err)
 	}
 
 	// Run concurrent readers and writers
@@ -132,14 +129,9 @@ func TestHotReload_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < numIterations; j++ {
-				pipeline, ok := factory.Pipeline("concurrent-pipeline")
-				if !ok {
-					t.Error("failed to get pipeline during concurrent access")
-					return
-				}
-				_, err := pipeline.Process(ctx, input)
-				if err != nil {
-					t.Errorf("processing failed: %v", err)
+				_, pErr := binding.Process(ctx, input)
+				if pErr != nil {
+					t.Errorf("processing failed: %v", pErr)
 					return
 				}
 			}
@@ -155,7 +147,7 @@ func TestHotReload_ConcurrentAccess(t *testing.T) {
 				Version: string(rune('A' + j)),
 				Node:    flume.Node{Ref: "processor"},
 			}
-			if err := factory.SetSchema("concurrent-pipeline", newSchema); err != nil {
+			if err := binding.Update(newSchema); err != nil {
 				t.Errorf("failed to update schema: %v", err)
 				return
 			}
@@ -172,144 +164,165 @@ func TestHotReload_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestHotReload_SchemaRemoval(t *testing.T) {
+func TestHotReload_BindingRollback(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("processor", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
-		return d
-	}))
+	// Define identities upfront
+	v1ID := factory.Identity("v1", "Version 1 processor that prefixes name with v1")
+	v2ID := factory.Identity("v2", "Version 2 processor that prefixes name with v2")
+	pipelineID := factory.Identity("rollback-test", "Pipeline for rollback testing")
 
-	schema := flume.Schema{
-		Node: flume.Node{Ref: "processor"},
+	factory.Add(
+		pipz.Transform(v1ID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+			d.Name = "v1-" + d.Name
+			return d
+		}),
+		pipz.Transform(v2ID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+			d.Name = "v2-" + d.Name
+			return d
+		}),
+	)
+
+	schemaV1 := flume.Schema{
+		Node: flume.Node{Ref: "v1"},
 	}
 
-	// Set schema
-	err := factory.SetSchema("removable", schema)
+	binding, err := factory.Bind(pipelineID, schemaV1)
 	if err != nil {
-		t.Fatalf("failed to set schema: %v", err)
+		t.Fatalf("failed to bind schema: %v", err)
 	}
 
-	// Verify it exists
-	_, ok := factory.Pipeline("removable")
-	if !ok {
-		t.Fatal("expected pipeline to exist")
+	ctx := context.Background()
+	input := flumetesting.TestData{ID: 1, Name: "test"}
+
+	// Verify v1 works
+	result, pErr := binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v1 processing failed: %v", pErr)
+	}
+	if result.Name != "v1-test" {
+		t.Errorf("expected 'v1-test', got %q", result.Name)
 	}
 
-	// Verify it's in the list
-	schemas := factory.ListSchemas()
-	found := false
-	for _, name := range schemas {
-		if name == "removable" {
-			found = true
-			break
-		}
+	// Update to v2
+	schemaV2 := flume.Schema{
+		Node: flume.Node{Ref: "v2"},
 	}
-	if !found {
-		t.Error("expected 'removable' in schema list")
+	err = binding.Update(schemaV2)
+	if err != nil {
+		t.Fatalf("failed to update: %v", err)
 	}
 
-	// Remove schema
-	removed := factory.RemoveSchema("removable")
-	if !removed {
-		t.Error("expected RemoveSchema to return true")
+	// Verify v2 works
+	result, pErr = binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v2 processing failed: %v", pErr)
+	}
+	if result.Name != "v2-test" {
+		t.Errorf("expected 'v2-test', got %q", result.Name)
 	}
 
-	// Verify it no longer exists
-	_, ok = factory.Pipeline("removable")
-	if ok {
-		t.Error("expected pipeline to be removed")
+	// Rollback to v1
+	err = binding.Rollback()
+	if err != nil {
+		t.Fatalf("rollback failed: %v", err)
 	}
 
-	// Removing again should return false
-	removed = factory.RemoveSchema("removable")
-	if removed {
-		t.Error("expected RemoveSchema to return false for non-existent schema")
+	// Verify rollback restored v1
+	result, pErr = binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v1 processing after rollback failed: %v", pErr)
+	}
+	if result.Name != "v1-test" {
+		t.Errorf("expected 'v1-test' after rollback, got %q", result.Name)
 	}
 }
 
-func TestHotReload_MultipleSchemas(t *testing.T) {
+func TestHotReload_MultipleBindings(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	doubleID := factory.Identity("double", "Doubles the value")
+	tripleID := factory.Identity("triple", "Triples the value")
+	addTenID := factory.Identity("add-ten", "Adds ten to the value")
+	doublePipelineID := factory.Identity("double-pipeline", "Pipeline that doubles values")
+	triplePipelineID := factory.Identity("triple-pipeline", "Pipeline that triples values")
+	addTenPipelineID := factory.Identity("add-ten-pipeline", "Pipeline that doubles then adds ten")
+
 	factory.Add(
-		pipz.Transform("double", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(doubleID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Value *= 2
 			return d
 		}),
-		pipz.Transform("triple", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(tripleID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Value *= 3
 			return d
 		}),
-		pipz.Transform("add-ten", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(addTenID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Value += 10
 			return d
 		}),
 	)
 
-	// Register multiple schemas
-	schemas := map[string]flume.Schema{
-		"double-pipeline": {Node: flume.Node{Ref: "double"}},
-		"triple-pipeline": {Node: flume.Node{Ref: "triple"}},
-		"add-ten-pipeline": {Node: flume.Node{
+	// Create multiple bindings
+	type bindingCase struct {
+		id       pipz.Identity
+		schema   flume.Schema
+		expected float64
+	}
+
+	cases := []bindingCase{
+		{doublePipelineID, flume.Schema{Node: flume.Node{Ref: "double"}}, 10.0},
+		{triplePipelineID, flume.Schema{Node: flume.Node{Ref: "triple"}}, 15.0},
+		{addTenPipelineID, flume.Schema{Node: flume.Node{
 			Type: "sequence",
 			Children: []flume.Node{
 				{Ref: "double"},
 				{Ref: "add-ten"},
 			},
-		}},
+		}}, 20.0}, // (5 * 2) + 10
 	}
 
-	for name, schema := range schemas {
-		if err := factory.SetSchema(name, schema); err != nil {
-			t.Fatalf("failed to set schema %q: %v", name, err)
+	bindings := make(map[string]*flume.Binding[flumetesting.TestData])
+	for _, c := range cases {
+		binding, err := factory.Bind(c.id, c.schema)
+		if err != nil {
+			t.Fatalf("failed to bind %q: %v", c.id.Name(), err)
 		}
+		bindings[c.id.Name()] = binding
 	}
 
 	ctx := context.Background()
 	input := flumetesting.TestData{ID: 1, Value: 5.0}
 
-	// Test each pipeline
-	tests := []struct {
-		pipelineName string
-		expected     float64
-	}{
-		{"double-pipeline", 10.0},
-		{"triple-pipeline", 15.0},
-		{"add-ten-pipeline", 20.0}, // (5 * 2) + 10
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.pipelineName, func(t *testing.T) {
-			pipeline, ok := factory.Pipeline(tt.pipelineName)
-			if !ok {
-				t.Fatalf("failed to get pipeline %q", tt.pipelineName)
+	// Test each binding
+	for _, c := range cases {
+		t.Run(c.id.Name(), func(t *testing.T) {
+			binding := bindings[c.id.Name()]
+			result, pErr := binding.Process(ctx, input)
+			if pErr != nil {
+				t.Fatalf("processing failed: %v", pErr)
 			}
 
-			result, err := pipeline.Process(ctx, input)
-			if err != nil {
-				t.Fatalf("processing failed: %v", err)
-			}
-
-			if result.Value != tt.expected {
-				t.Errorf("expected Value=%f, got %f", tt.expected, result.Value)
+			if result.Value != c.expected {
+				t.Errorf("expected Value=%f, got %f", c.expected, result.Value)
 			}
 		})
 	}
-
-	// Verify list includes all schemas
-	schemaList := factory.ListSchemas()
-	if len(schemaList) != len(schemas) {
-		t.Errorf("expected %d schemas, got %d", len(schemas), len(schemaList))
-	}
 }
 
-func TestHotReload_GetSchema(t *testing.T) {
+func TestHotReload_BindingHistory(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("processor", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	// Define identities upfront
+	processorID := factory.Identity("processor", "Pass-through processor for history test")
+	pipelineID := factory.Identity("test-schema", "Pipeline for binding history test")
+
+	factory.Add(pipz.Transform(processorID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		return d
 	}))
 
-	originalSchema := flume.Schema{
+	schema := flume.Schema{
 		Version: "1.2.3",
 		Node: flume.Node{
 			Type: "sequence",
@@ -319,53 +332,63 @@ func TestHotReload_GetSchema(t *testing.T) {
 		},
 	}
 
-	err := factory.SetSchema("test-schema", originalSchema)
+	binding, err := factory.Bind(pipelineID, schema)
 	if err != nil {
-		t.Fatalf("failed to set schema: %v", err)
+		t.Fatalf("failed to bind schema: %v", err)
 	}
 
-	// Retrieve schema
-	retrieved, ok := factory.GetSchema("test-schema")
-	if !ok {
-		t.Fatal("expected to retrieve schema")
+	// Process to verify it works
+	ctx := context.Background()
+	input := flumetesting.TestData{ID: 1}
+
+	_, pErr := binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("processing failed: %v", pErr)
 	}
 
-	// Verify version is preserved
-	if retrieved.Version != "1.2.3" {
-		t.Errorf("expected version '1.2.3', got %q", retrieved.Version)
+	// Update schema
+	schema2 := flume.Schema{
+		Version: "2.0.0",
+		Node:    flume.Node{Ref: "processor"},
+	}
+	err = binding.Update(schema2)
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
 	}
 
-	// Verify structure is preserved
-	if retrieved.Type != "sequence" {
-		t.Errorf("expected type 'sequence', got %q", retrieved.Type)
+	// Verify we can roll back
+	err = binding.Rollback()
+	if err != nil {
+		t.Fatalf("rollback failed: %v", err)
 	}
 
-	if len(retrieved.Children) != 1 {
-		t.Errorf("expected 1 child, got %d", len(retrieved.Children))
-	}
-
-	// Non-existent schema
-	_, ok = factory.GetSchema("nonexistent")
-	if ok {
-		t.Error("expected GetSchema to return false for non-existent schema")
+	// Non-existent binding
+	nonexistentID := factory.Identity("nonexistent", "Identity for testing non-existent binding lookup")
+	missing := factory.Get(nonexistentID)
+	if missing != nil {
+		t.Error("expected Get to return nil for non-existent binding")
 	}
 }
 
 func TestHotReload_ValidationOnUpdate(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("valid-processor", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	// Define identities upfront
+	processorID := factory.Identity("valid-processor", "Valid processor for validation test")
+	pipelineID := factory.Identity("validated", "Pipeline for validation on update test")
+
+	factory.Add(pipz.Transform(processorID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		return d
 	}))
 
-	// Set valid schema
+	// Bind valid schema
 	validSchema := flume.Schema{
 		Node: flume.Node{Ref: "valid-processor"},
 	}
 
-	err := factory.SetSchema("validated", validSchema)
+	binding, err := factory.Bind(pipelineID, validSchema)
 	if err != nil {
-		t.Fatalf("failed to set valid schema: %v", err)
+		t.Fatalf("failed to bind valid schema: %v", err)
 	}
 
 	// Attempt to update with invalid schema
@@ -373,32 +396,31 @@ func TestHotReload_ValidationOnUpdate(t *testing.T) {
 		Node: flume.Node{Ref: "nonexistent-processor"},
 	}
 
-	err = factory.SetSchema("validated", invalidSchema)
+	err = binding.Update(invalidSchema)
 	if err == nil {
-		t.Error("expected error when setting invalid schema")
+		t.Error("expected error when updating with invalid schema")
 	}
 
 	// Verify original schema still works
-	pipeline, ok := factory.Pipeline("validated")
-	if !ok {
-		t.Fatal("expected pipeline to still exist after failed update")
-	}
-
 	ctx := context.Background()
 	input := flumetesting.TestData{ID: 1}
-	_, err = pipeline.Process(ctx, input)
-	if err != nil {
-		t.Errorf("original pipeline should still work: %v", err)
+	_, pErr := binding.Process(ctx, input)
+	if pErr != nil {
+		t.Errorf("original binding should still work: %v", pErr)
 	}
 }
 
 func TestHotReload_ProcessorUpdate(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	versionedID := factory.Identity("versioned", "Versioned processor that sets ID from atomic version")
+	pipelineID := factory.Identity("processor-update", "Pipeline for processor update test")
+
 	var version int64
 
 	// Initial processor
-	factory.Add(pipz.Transform("versioned", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	factory.Add(pipz.Transform(versionedID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		d.ID = int(atomic.LoadInt64(&version))
 		return d
 	}))
@@ -407,9 +429,9 @@ func TestHotReload_ProcessorUpdate(t *testing.T) {
 		Node: flume.Node{Ref: "versioned"},
 	}
 
-	err := factory.SetSchema("processor-update", schema)
+	binding, err := factory.Bind(pipelineID, schema)
 	if err != nil {
-		t.Fatalf("failed to set schema: %v", err)
+		t.Fatalf("failed to bind schema: %v", err)
 	}
 
 	ctx := context.Background()
@@ -417,10 +439,9 @@ func TestHotReload_ProcessorUpdate(t *testing.T) {
 
 	// Process with v1
 	atomic.StoreInt64(&version, 1)
-	pipeline, _ := factory.Pipeline("processor-update")
-	result, err := pipeline.Process(ctx, input)
-	if err != nil {
-		t.Fatalf("v1 processing failed: %v", err)
+	result, pErr := binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v1 processing failed: %v", pErr)
 	}
 	if result.ID != 1 {
 		t.Errorf("expected ID=1, got %d", result.ID)
@@ -428,9 +449,9 @@ func TestHotReload_ProcessorUpdate(t *testing.T) {
 
 	// Update processor version
 	atomic.StoreInt64(&version, 2)
-	result, err = pipeline.Process(ctx, input)
-	if err != nil {
-		t.Fatalf("v2 processing failed: %v", err)
+	result, pErr = binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("v2 processing failed: %v", pErr)
 	}
 	if result.ID != 2 {
 		t.Errorf("expected ID=2, got %d", result.ID)
@@ -440,7 +461,11 @@ func TestHotReload_ProcessorUpdate(t *testing.T) {
 func TestHotReload_ChannelPersistence(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("process", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	// Define identities upfront
+	processID := factory.Identity("process", "Pass-through processor for channel persistence test")
+	pipelineID := factory.Identity("channel-pipeline", "Pipeline for channel persistence test")
+
+	factory.Add(pipz.Transform(processID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		return d
 	}))
 
@@ -457,19 +482,18 @@ func TestHotReload_ChannelPersistence(t *testing.T) {
 		},
 	}
 
-	err := factory.SetSchema("channel-pipeline", schema)
+	binding, err := factory.Bind(pipelineID, schema)
 	if err != nil {
-		t.Fatalf("failed to set schema: %v", err)
+		t.Fatalf("failed to bind schema: %v", err)
 	}
 
 	// Process data
 	ctx := context.Background()
 	input := flumetesting.TestData{ID: 1, Name: "test"}
 
-	pipeline, _ := factory.Pipeline("channel-pipeline")
-	_, err = pipeline.Process(ctx, input)
-	if err != nil {
-		t.Fatalf("processing failed: %v", err)
+	_, pErr := binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("processing failed: %v", pErr)
 	}
 
 	// Check channel received data
@@ -484,17 +508,16 @@ func TestHotReload_ChannelPersistence(t *testing.T) {
 
 	// Update schema (channel should still work)
 	schema.Version = "2.0.0"
-	err = factory.SetSchema("channel-pipeline", schema)
+	err = binding.Update(schema)
 	if err != nil {
-		t.Fatalf("failed to update schema: %v", err)
+		t.Fatalf("failed to update binding: %v", err)
 	}
 
 	// Process again
 	input.ID = 2
-	pipeline, _ = factory.Pipeline("channel-pipeline")
-	_, err = pipeline.Process(ctx, input)
-	if err != nil {
-		t.Fatalf("processing failed after update: %v", err)
+	_, pErr = binding.Process(ctx, input)
+	if pErr != nil {
+		t.Fatalf("processing failed after update: %v", pErr)
 	}
 
 	select {

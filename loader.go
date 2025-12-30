@@ -16,7 +16,8 @@ import (
 // BuildFromFile loads a schema from a file and builds the pipeline.
 // Supports JSON and YAML formats based on file extension.
 func (f *Factory[T]) BuildFromFile(path string) (pipz.Chainable[T], error) {
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath) //nolint:gosec // Path is cleaned; caller is responsible for access control
 	if err != nil {
 		capitan.Emit(context.Background(), SchemaFileFailed,
 			KeyPath.Field(path),
@@ -29,7 +30,7 @@ func (f *Factory[T]) BuildFromFile(path string) (pipz.Chainable[T], error) {
 		KeySizeBytes.Field(len(data)))
 
 	var schema Schema
-	ext := strings.ToLower(filepath.Ext(path))
+	ext := strings.ToLower(filepath.Ext(cleanPath))
 
 	switch ext {
 	case ".json":

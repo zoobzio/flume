@@ -33,7 +33,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "missing predicate",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -51,7 +52,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "missing condition",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -83,7 +85,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "both ref and type",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -112,7 +115,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "fallback with wrong number of children",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -144,7 +148,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "negative retry attempts",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -162,7 +167,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "invalid timeout duration",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -180,7 +186,8 @@ func TestValidation(t *testing.T) {
 		{
 			name: "invalid backoff duration",
 			setup: func(f *flume.Factory[TestData]) {
-				f.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := f.Identity("test", "Test processor")
+				f.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -198,8 +205,9 @@ func TestValidation(t *testing.T) {
 		{
 			name: "filter without then",
 			setup: func(f *flume.Factory[TestData]) {
+				testPredID := f.Identity("test-pred", "Test predicate")
 				f.AddPredicate(flume.Predicate[TestData]{
-					Name: "test-pred",
+					Identity: testPredID,
 					Predicate: func(_ context.Context, _ TestData) bool {
 						return true
 					},
@@ -219,8 +227,9 @@ func TestValidation(t *testing.T) {
 		{
 			name: "switch without routes",
 			setup: func(f *flume.Factory[TestData]) {
+				testCondID := f.Identity("test-cond", "Test condition")
 				f.AddCondition(flume.Condition[TestData]{
-					Name: "test-cond",
+					Identity: testCondID,
 					Condition: func(_ context.Context, _ TestData) string {
 						return "a"
 					},
@@ -277,7 +286,8 @@ func TestValidation(t *testing.T) {
 			name: "multiple errors",
 			setup: func(f *flume.Factory[TestData]) {
 				// Only register one processor
-				f.Add(pipz.Transform("exists", func(_ context.Context, d TestData) TestData {
+				existsID := f.Identity("exists", "Existing processor")
+				f.Add(pipz.Transform(existsID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -306,8 +316,9 @@ func TestValidation(t *testing.T) {
 		{
 			name: "nested validation errors",
 			setup: func(f *flume.Factory[TestData]) {
+				routeID := f.Identity("route", "Routing condition")
 				f.AddCondition(flume.Condition[TestData]{
-					Name: "route",
+					Identity: routeID,
 					Condition: func(_ context.Context, _ TestData) string {
 						return "a"
 					},
@@ -335,7 +346,8 @@ func TestValidation(t *testing.T) {
 			name: "circular reference in sequence",
 			setup: func(f *flume.Factory[TestData]) {
 				// Register a processor that exists
-				f.Add(pipz.Transform("proc1", func(_ context.Context, d TestData) TestData {
+				proc1ID := f.Identity("proc1", "First processor")
+				f.Add(pipz.Transform(proc1ID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -355,11 +367,13 @@ func TestValidation(t *testing.T) {
 		{
 			name: "circular reference in nested structure",
 			setup: func(f *flume.Factory[TestData]) {
+				proc1ID := f.Identity("proc1", "First processor")
+				proc2ID := f.Identity("proc2", "Second processor")
 				f.Add(
-					pipz.Transform("proc1", func(_ context.Context, d TestData) TestData {
+					pipz.Transform(proc1ID, func(_ context.Context, d TestData) TestData {
 						return d
 					}),
-					pipz.Transform("proc2", func(_ context.Context, d TestData) TestData {
+					pipz.Transform(proc2ID, func(_ context.Context, d TestData) TestData {
 						return d
 					}),
 				)
@@ -386,16 +400,19 @@ func TestValidation(t *testing.T) {
 		{
 			name: "same processor in switch routes is valid",
 			setup: func(f *flume.Factory[TestData]) {
+				approveID := f.Identity("approve", "Approval processor")
+				rejectID := f.Identity("reject", "Rejection processor")
+				routeID := f.Identity("route", "Routing condition")
 				f.Add(
-					pipz.Transform("approve", func(_ context.Context, d TestData) TestData {
+					pipz.Transform(approveID, func(_ context.Context, d TestData) TestData {
 						return d
 					}),
-					pipz.Transform("reject", func(_ context.Context, d TestData) TestData {
+					pipz.Transform(rejectID, func(_ context.Context, d TestData) TestData {
 						return d
 					}),
 				)
 				f.AddCondition(flume.Condition[TestData]{
-					Name: "route",
+					Identity: routeID,
 					Condition: func(_ context.Context, _ TestData) string {
 						return "a"
 					},
@@ -417,13 +434,15 @@ func TestValidation(t *testing.T) {
 		{
 			name: "same processor in filter branches is valid",
 			setup: func(f *flume.Factory[TestData]) {
+				processID := f.Identity("process", "Processing handler")
+				checkID := f.Identity("check", "Check predicate")
 				f.Add(
-					pipz.Transform("process", func(_ context.Context, d TestData) TestData {
+					pipz.Transform(processID, func(_ context.Context, d TestData) TestData {
 						return d
 					}),
 				)
 				f.AddPredicate(flume.Predicate[TestData]{
-					Name: "check",
+					Identity: checkID,
 					Predicate: func(_ context.Context, _ TestData) bool {
 						return true
 					},
@@ -442,8 +461,9 @@ func TestValidation(t *testing.T) {
 		{
 			name: "same processor in fallback branches is valid",
 			setup: func(f *flume.Factory[TestData]) {
+				handlerID := f.Identity("handler", "Fallback handler")
 				f.Add(
-					pipz.Transform("handler", func(_ context.Context, d TestData) TestData {
+					pipz.Transform(handlerID, func(_ context.Context, d TestData) TestData {
 						return d
 					}),
 				)
@@ -458,6 +478,81 @@ func TestValidation(t *testing.T) {
 				},
 			},
 			expectedErrors: []string{}, // No errors expected
+		},
+		{
+			name: "valid stream with registered channel",
+			setup: func(f *flume.Factory[TestData]) {
+				channel := make(chan TestData, 10)
+				f.AddChannel("test-channel", channel)
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "test-channel",
+				},
+			},
+			expectedErrors: []string{}, // No errors expected
+		},
+		{
+			name: "missing channel",
+			setup: func(_ *flume.Factory[TestData]) {
+				// Don't register any channel
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "missing",
+				},
+			},
+			expectedErrors: []string{
+				"channel 'missing' not found",
+			},
+		},
+		{
+			name: "stream with invalid child processor",
+			setup: func(f *flume.Factory[TestData]) {
+				channel := make(chan TestData, 10)
+				f.AddChannel("test-channel", channel)
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "test-channel",
+					Child:  &flume.Node{Ref: "missing-processor"},
+				},
+			},
+			expectedErrors: []string{
+				"processor 'missing-processor' not found",
+			},
+		},
+		{
+			name: "stream with invalid children processor",
+			setup: func(f *flume.Factory[TestData]) {
+				channel := make(chan TestData, 10)
+				f.AddChannel("test-channel", channel)
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream:   "test-channel",
+					Children: []flume.Node{{Ref: "missing-processor"}},
+				},
+			},
+			expectedErrors: []string{
+				"processor 'missing-processor' not found",
+			},
+		},
+		{
+			name: "stream with type field",
+			setup: func(f *flume.Factory[TestData]) {
+				channel := make(chan TestData, 10)
+				f.AddChannel("test-channel", channel)
+			},
+			schema: flume.Schema{
+				Node: flume.Node{
+					Stream: "test-channel",
+					Type:   "sequence",
+				},
+			},
+			expectedErrors: []string{
+				"stream node should not have type or ref fields",
+			},
 		},
 	}
 
@@ -540,8 +635,12 @@ func TestValidationErrorFormatting(t *testing.T) {
 func TestSchemaVersion(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities
+	proc1ID := factory.Identity("proc1", "Test processor for versioning")
+	testID := factory.Identity("test", "Test binding")
+
 	// Create a simple processor
-	factory.Add(pipz.Apply("proc1", func(_ context.Context, data TestData) (TestData, error) {
+	factory.Add(pipz.Apply(proc1ID, func(_ context.Context, data TestData) (TestData, error) {
 		return data, nil
 	}))
 
@@ -553,19 +652,17 @@ func TestSchemaVersion(t *testing.T) {
 		},
 	}
 
-	// Set initial schema
-	err := factory.SetSchema("test", schemaV1)
+	// Bind initial schema
+	binding, err := factory.Bind(testID, schemaV1)
 	if err != nil {
-		t.Fatalf("Failed to set schema v1: %v", err)
+		t.Fatalf("Failed to bind schema v1: %v", err)
 	}
 
-	// Get schema and verify version
-	retrieved, ok := factory.GetSchema("test")
-	if !ok {
-		t.Fatal("Failed to retrieve schema")
-	}
-	if retrieved.Version != "1.0.0" {
-		t.Errorf("Expected version 1.0.0, got %s", retrieved.Version)
+	// Verify binding works
+	ctx := context.Background()
+	_, pErr := binding.Process(ctx, TestData{})
+	if pErr != nil {
+		t.Fatalf("Failed to process with v1: %v", pErr)
 	}
 
 	// Update to version 2
@@ -576,18 +673,15 @@ func TestSchemaVersion(t *testing.T) {
 		},
 	}
 
-	err = factory.SetSchema("test", schemaV2)
+	err = binding.Update(schemaV2)
 	if err != nil {
 		t.Fatalf("Failed to update schema to v2: %v", err)
 	}
 
-	// Get updated schema
-	retrieved, ok = factory.GetSchema("test")
-	if !ok {
-		t.Fatal("Failed to retrieve updated schema")
-	}
-	if retrieved.Version != "2.0.0" {
-		t.Errorf("Expected version 2.0.0, got %s", retrieved.Version)
+	// Verify updated binding works
+	_, pErr = binding.Process(ctx, TestData{})
+	if pErr != nil {
+		t.Fatalf("Failed to process with v2: %v", pErr)
 	}
 
 	// Test BuildFromJSON with version
@@ -624,17 +718,16 @@ ref: "proc1"`
 		},
 	}
 
-	err = factory.SetSchema("no-version", schemaNoVersion)
+	noVersionID := factory.Identity("no-version", "Binding without version")
+	binding2, err := factory.Bind(noVersionID, schemaNoVersion)
 	if err != nil {
-		t.Fatalf("Failed to set schema without version: %v", err)
+		t.Fatalf("Failed to bind schema without version: %v", err)
 	}
 
-	retrieved, ok = factory.GetSchema("no-version")
-	if !ok {
-		t.Fatal("Failed to retrieve schema without version")
-	}
-	if retrieved.Version != "" {
-		t.Errorf("Expected empty version, got %s", retrieved.Version)
+	// Verify it works
+	_, pErr = binding2.Process(ctx, TestData{})
+	if pErr != nil {
+		t.Fatalf("Failed to process schema without version: %v", pErr)
 	}
 }
 

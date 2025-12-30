@@ -25,17 +25,22 @@ func (t TestData) Clone() TestData {
 func TestFactoryBasic(t *testing.T) {
 	factory := flume.New[TestData]()
 
-	// Register processors using variadic function
+	// Define identities upfront with meaningful descriptions
+	uppercaseID := factory.Identity("uppercase", "Appends _UPPER suffix to value")
+	incrementID := factory.Identity("increment", "Increments counter by one")
+	logID := factory.Identity("log", "Logs the data for debugging")
+
+	// Register processors using managed identities
 	factory.Add(
-		pipz.Transform("uppercase", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(uppercaseID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_UPPER"
 			return d
 		}),
-		pipz.Apply("increment", func(_ context.Context, d TestData) (TestData, error) {
+		pipz.Apply(incrementID, func(_ context.Context, d TestData) (TestData, error) {
 			d.Counter++
 			return d, nil
 		}),
-		pipz.Effect("log", func(_ context.Context, _ TestData) error {
+		pipz.Effect(logID, func(_ context.Context, _ TestData) error {
 			// In real use, this would log
 			return nil
 		}),
@@ -79,20 +84,25 @@ func TestFactoryBasic(t *testing.T) {
 func TestFactoryWithPredicates(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities
+	doubleID := factory.Identity("double", "Doubles the counter value")
+	addTenID := factory.Identity("add-ten", "Adds ten to the counter")
+	isHighID := factory.Identity("is-high", "Checks if counter exceeds threshold")
+
 	// Register processors
-	factory.Add(pipz.Transform("double", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(doubleID, func(_ context.Context, d TestData) TestData {
 		d.Counter *= 2
 		return d
 	}))
 
-	factory.Add(pipz.Transform("add-ten", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(addTenID, func(_ context.Context, d TestData) TestData {
 		d.Counter += 10
 		return d
 	}))
 
 	// Add predicate
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name: "is-high",
+		Identity: isHighID,
 		Predicate: func(_ context.Context, d TestData) bool {
 			return d.Counter > 5
 		},
@@ -146,25 +156,31 @@ func TestFactoryWithPredicates(t *testing.T) {
 func TestFactoryWithConditions(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities
+	routeAID := factory.Identity("route-a", "Handles route A processing")
+	routeBID := factory.Identity("route-b", "Handles route B processing")
+	routeDefaultID := factory.Identity("route-default", "Handles default route")
+	valueSwitchID := factory.Identity("value-switch", "Routes based on input value")
+
 	// Register processors
-	factory.Add(pipz.Transform("route-a", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(routeAID, func(_ context.Context, d TestData) TestData {
 		d.Value = "route-a"
 		return d
 	}))
 
-	factory.Add(pipz.Transform("route-b", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(routeBID, func(_ context.Context, d TestData) TestData {
 		d.Value = "route-b"
 		return d
 	}))
 
-	factory.Add(pipz.Transform("route-default", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(routeDefaultID, func(_ context.Context, d TestData) TestData {
 		d.Value = "route-default"
 		return d
 	}))
 
 	// Add condition
 	factory.AddCondition(flume.Condition[TestData]{
-		Name: "value-switch",
+		Identity: valueSwitchID,
 		Condition: func(_ context.Context, d TestData) string {
 			switch d.Value {
 			case "a":
@@ -262,9 +278,13 @@ func TestFactoryComplexPipeline(t *testing.T) {
 	t.Run("retry succeeds", func(t *testing.T) {
 		factory := flume.New[TestData]()
 
+		// Define identities
+		mayFailID := factory.Identity("may-fail", "Processor that may fail temporarily")
+		fallbackID := factory.Identity("fallback", "Fallback processor for failures")
+
 		// Register processor that fails first 2 times
 		errorCount := 0
-		factory.Add(pipz.Apply("may-fail", func(_ context.Context, d TestData) (TestData, error) {
+		factory.Add(pipz.Apply(mayFailID, func(_ context.Context, d TestData) (TestData, error) {
 			errorCount++
 			if errorCount <= 2 {
 				return d, errors.New("temporary error")
@@ -273,7 +293,7 @@ func TestFactoryComplexPipeline(t *testing.T) {
 			return d, nil
 		}))
 
-		factory.Add(pipz.Transform("fallback", func(_ context.Context, d TestData) TestData {
+		factory.Add(pipz.Transform(fallbackID, func(_ context.Context, d TestData) TestData {
 			d.Value = "fallback"
 			return d
 		}))
@@ -314,12 +334,16 @@ func TestFactoryComplexPipeline(t *testing.T) {
 	t.Run("fallback activates", func(t *testing.T) {
 		factory := flume.New[TestData]()
 
+		// Define identities
+		mayFailID := factory.Identity("may-fail", "Processor that always fails")
+		fallbackID := factory.Identity("fallback", "Fallback processor for failures")
+
 		// Register processor that always fails
-		factory.Add(pipz.Apply("may-fail", func(_ context.Context, d TestData) (TestData, error) {
+		factory.Add(pipz.Apply(mayFailID, func(_ context.Context, d TestData) (TestData, error) {
 			return d, errors.New("permanent error")
 		}))
 
-		factory.Add(pipz.Transform("fallback", func(_ context.Context, d TestData) TestData {
+		factory.Add(pipz.Transform(fallbackID, func(_ context.Context, d TestData) TestData {
 			d.Value = "fallback"
 			return d
 		}))
@@ -360,7 +384,8 @@ func TestFactoryComplexPipeline(t *testing.T) {
 func TestFactoryBackoff(t *testing.T) {
 	factory := flume.New[TestData]()
 
-	factory.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+	testID := factory.Identity("test", "Test processor for backoff")
+	factory.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 		d.Value = "backoff-test"
 		return d
 	}))
@@ -395,23 +420,29 @@ func TestFactoryBackoff(t *testing.T) {
 func TestFactoryDynamicSchema(t *testing.T) {
 	factory := flume.New[TestData]()
 
-	// Test getting non-existent pipeline
-	_, ok := factory.Pipeline("non-existent")
-	if ok {
-		t.Error("Expected Pipeline to return false for non-existent schema")
+	// Define identities
+	nonExistentID := factory.Identity("non-existent", "Non-existent binding for testing")
+	step1ID := factory.Identity("step1", "First step in sequence")
+	step2ID := factory.Identity("step2", "Second step in sequence")
+	dynamicID := factory.Identity("dynamic", "Dynamic pipeline binding")
+
+	// Test getting non-existent binding
+	binding := factory.Get(nonExistentID)
+	if binding != nil {
+		t.Error("Expected Get to return nil for non-existent binding")
 	}
 
-	factory.Add(pipz.Transform("step1", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
 		d.Value += "_1"
 		return d
 	}))
 
-	factory.Add(pipz.Transform("step2", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
 		d.Value += "_2"
 		return d
 	}))
 
-	// Register initial schema
+	// Register initial schema via Bind
 	schema1 := flume.Schema{
 		Node: flume.Node{
 			Type: "sequence",
@@ -421,27 +452,23 @@ func TestFactoryDynamicSchema(t *testing.T) {
 		},
 	}
 
-	err := factory.SetSchema("dynamic", schema1)
+	id := dynamicID
+	binding, err := factory.Bind(id, schema1)
 	if err != nil {
-		t.Fatalf("Failed to register schema: %v", err)
+		t.Fatalf("Failed to bind schema: %v", err)
 	}
 
-	// Test initial schema
-	pipeline, ok := factory.Pipeline("dynamic")
-	if !ok {
-		t.Fatal("Pipeline should exist")
-	}
-
+	// Test initial schema via binding
 	ctx := context.Background()
-	result, pErr := pipeline.Process(ctx, TestData{Value: "test"})
+	result, pErr := binding.Process(ctx, TestData{Value: "test"})
 	if pErr != nil {
-		t.Fatalf("Pipeline error: %v", pErr)
+		t.Fatalf("Process error: %v", pErr)
 	}
 	if result.Value != "test_1" {
 		t.Errorf("Expected 'test_1', got '%s'", result.Value)
 	}
 
-	// Update schema
+	// Update schema via Update
 	schema2 := flume.Schema{
 		Node: flume.Node{
 			Type: "sequence",
@@ -452,19 +479,15 @@ func TestFactoryDynamicSchema(t *testing.T) {
 		},
 	}
 
-	err = factory.SetSchema("dynamic", schema2)
+	err = binding.Update(schema2)
 	if err != nil {
 		t.Fatalf("Failed to update schema: %v", err)
 	}
 
 	// Test updated schema
-	pipeline, ok = factory.Pipeline("dynamic")
-	if !ok {
-		t.Fatal("Pipeline should still exist after update")
-	}
-	result, pErr = pipeline.Process(ctx, TestData{Value: "test"})
+	result, pErr = binding.Process(ctx, TestData{Value: "test"})
 	if pErr != nil {
-		t.Fatalf("Pipeline error: %v", pErr)
+		t.Fatalf("Process error: %v", pErr)
 	}
 	if result.Value != "test_1_2" {
 		t.Errorf("Expected 'test_1_2', got '%s'", result.Value)
@@ -496,18 +519,22 @@ func TestFactoryUtilities(t *testing.T) {
 		t.Error("Expected empty condition list")
 	}
 
-	// Register components
-	factory.Add(pipz.Transform("test-processor", func(_ context.Context, d TestData) TestData {
+	// Define and register components
+	testProcessorID := factory.Identity("test-processor", "Test processor for registration")
+	testPredicateID := factory.Identity("test-predicate", "Test predicate for registration")
+	testConditionID := factory.Identity("test-condition", "Test condition for registration")
+
+	factory.Add(pipz.Transform(testProcessorID, func(_ context.Context, d TestData) TestData {
 		return d
 	}))
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name: "test-predicate",
+		Identity: testPredicateID,
 		Predicate: func(_ context.Context, _ TestData) bool {
 			return true
 		},
 	})
 	factory.AddCondition(flume.Condition[TestData]{
-		Name: "test-condition",
+		Identity: testConditionID,
 		Condition: func(_ context.Context, _ TestData) string {
 			return "test"
 		},
@@ -544,25 +571,41 @@ func TestFactoryUtilities(t *testing.T) {
 func TestVariadicRegistration(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define processor identities
+	step1ID := factory.Identity("step1", "First step appends _1")
+	step2ID := factory.Identity("step2", "Second step appends _2")
+	step3ID := factory.Identity("step3", "Third step appends _3")
+	step4ID := factory.Identity("step4", "Fourth step appends _4")
+	step5ID := factory.Identity("step5", "Fifth step appends _5")
+
+	// Define predicate identities
+	isPositiveID := factory.Identity("is-positive", "Checks if counter is positive")
+	isHighID := factory.Identity("is-high", "Checks if counter exceeds 10")
+	hasValueID := factory.Identity("has-value", "Checks if value is non-empty")
+
+	// Define condition identities
+	counterRangeID := factory.Identity("counter-range", "Categorizes counter into low/medium/high")
+	valueTypeID := factory.Identity("value-type", "Categorizes value as empty or non-empty")
+
 	// Test variadic processor registration
 	factory.Add(
-		pipz.Transform("step1", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_1"
 			return d
 		}),
-		pipz.Transform("step2", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_2"
 			return d
 		}),
-		pipz.Transform("step3", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step3ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_3"
 			return d
 		}),
-		pipz.Transform("step4", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step4ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_4"
 			return d
 		}),
-		pipz.Transform("step5", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step5ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_5"
 			return d
 		}),
@@ -571,19 +614,19 @@ func TestVariadicRegistration(t *testing.T) {
 	// Test variadic predicate registration
 	factory.AddPredicate(
 		flume.Predicate[TestData]{
-			Name: "is-positive",
+			Identity: isPositiveID,
 			Predicate: func(_ context.Context, d TestData) bool {
 				return d.Counter > 0
 			},
 		},
 		flume.Predicate[TestData]{
-			Name: "is-high",
+			Identity: isHighID,
 			Predicate: func(_ context.Context, d TestData) bool {
 				return d.Counter > 10
 			},
 		},
 		flume.Predicate[TestData]{
-			Name: "has-value",
+			Identity: hasValueID,
 			Predicate: func(_ context.Context, d TestData) bool {
 				return d.Value != ""
 			},
@@ -593,7 +636,7 @@ func TestVariadicRegistration(t *testing.T) {
 	// Test variadic condition registration
 	factory.AddCondition(
 		flume.Condition[TestData]{
-			Name: "counter-range",
+			Identity: counterRangeID,
 			Condition: func(_ context.Context, d TestData) string {
 				if d.Counter < 5 {
 					return "low"
@@ -604,7 +647,7 @@ func TestVariadicRegistration(t *testing.T) {
 			},
 		},
 		flume.Condition[TestData]{
-			Name: "value-type",
+			Identity: valueTypeID,
 			Condition: func(_ context.Context, d TestData) string {
 				if d.Value == "" {
 					return "empty"
@@ -675,99 +718,98 @@ func TestVariadicRegistration(t *testing.T) {
 func TestSchemaManagement(t *testing.T) {
 	factory := flume.New[TestData]()
 
-	// Test ListSchemas on empty factory
-	schemas := factory.ListSchemas()
-	if len(schemas) != 0 {
-		t.Error("Expected empty schema list")
-	}
+	// Define identities
+	testID := factory.Identity("test", "Test processor for schema management")
+	schema1ID := factory.Identity("schema1", "First schema binding")
+	nonExistentID := factory.Identity("non-existent", "Non-existent binding for testing")
 
 	// Add a processor for our schemas
-	factory.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 		d.Value = "processed"
 		return d
 	}))
 
-	// Test SetSchema (first time - should register)
+	// Test Bind (first time - should register)
 	schema1 := flume.Schema{
 		Node: flume.Node{Ref: "test"},
 	}
-	err := factory.SetSchema("schema1", schema1)
+	binding, err := factory.Bind(schema1ID, schema1)
 	if err != nil {
-		t.Fatalf("Failed to set schema: %v", err)
+		t.Fatalf("Failed to bind schema: %v", err)
+	}
+	if binding == nil {
+		t.Fatal("Expected non-nil binding")
 	}
 
-	// Test GetSchema
-	retrieved, ok := factory.GetSchema("schema1")
-	if !ok {
+	// Test Get retrieves the same binding
+	retrieved := factory.Get(schema1ID)
+	if retrieved == nil {
 		t.Error("Expected to find schema1")
 	}
-	if retrieved.Node.Ref != "test" {
-		t.Error("Retrieved schema doesn't match")
+	if retrieved != binding {
+		t.Error("Get should return the same binding instance")
 	}
 
-	// Test GetSchema for non-existent
-	_, ok = factory.GetSchema("non-existent")
-	if ok {
-		t.Error("Expected GetSchema to return false for non-existent schema")
+	// Test Get for non-existent
+	missing := factory.Get(nonExistentID)
+	if missing != nil {
+		t.Error("Expected Get to return nil for non-existent binding")
 	}
 
-	// Test ListSchemas with one schema
-	schemas = factory.ListSchemas()
-	if len(schemas) != 1 || schemas[0] != "schema1" {
-		t.Errorf("Expected [schema1], got %v", schemas)
-	}
-
-	// Test SetSchema (update existing)
+	// Test Update (update existing binding)
 	schema2 := flume.Schema{
 		Node: flume.Node{
 			Type:     "sequence",
 			Children: []flume.Node{{Ref: "test"}},
 		},
 	}
-	err = factory.SetSchema("schema1", schema2)
+	err = binding.Update(schema2)
 	if err != nil {
-		t.Fatalf("Failed to update schema: %v", err)
+		t.Fatalf("Failed to update binding: %v", err)
 	}
 
-	// Verify update worked
-	retrieved, _ = factory.GetSchema("schema1")
-	if retrieved.Node.Type != "sequence" {
-		t.Error("Schema was not updated")
+	// Verify update worked via process
+	ctx := context.Background()
+	result, pErr := binding.Process(ctx, TestData{Value: "input"})
+	if pErr != nil {
+		t.Fatalf("Process failed: %v", pErr)
+	}
+	if result.Value != "processed" {
+		t.Errorf("Expected 'processed', got '%s'", result.Value)
 	}
 
-	// Test RemoveSchema
-	removed := factory.RemoveSchema("schema1")
-	if !removed {
-		t.Error("Expected RemoveSchema to return true")
+	// Test Rollback
+	err = binding.Rollback()
+	if err != nil {
+		t.Fatalf("Rollback failed: %v", err)
 	}
 
-	// Try to remove again
-	removed = factory.RemoveSchema("schema1")
-	if removed {
-		t.Error("Expected RemoveSchema to return false for non-existent schema")
+	// Process again to verify rollback worked
+	result, pErr = binding.Process(ctx, TestData{Value: "input"})
+	if pErr != nil {
+		t.Fatalf("Process after rollback failed: %v", pErr)
 	}
-
-	// Verify removal
-	schemas = factory.ListSchemas()
-	if len(schemas) != 0 {
-		t.Error("Expected empty schema list after removal")
-	}
-
-	// Verify pipeline is also gone
-	_, ok = factory.Pipeline("schema1")
-	if ok {
-		t.Error("Pipeline should be removed with schema")
+	if result.Value != "processed" {
+		t.Errorf("Expected 'processed' after rollback, got '%s'", result.Value)
 	}
 }
 
 func TestComponentRemoval(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities
+	proc1ID := factory.Identity("proc1", "First processor for removal test")
+	proc2ID := factory.Identity("proc2", "Second processor for removal test")
+	proc3ID := factory.Identity("proc3", "Third processor for removal test")
+	pred1ID := factory.Identity("pred1", "First predicate for removal test")
+	pred2ID := factory.Identity("pred2", "Second predicate for removal test")
+	cond1ID := factory.Identity("cond1", "Condition for removal test")
+
 	// Add multiple processors
 	factory.Add(
-		pipz.Transform("proc1", func(_ context.Context, d TestData) TestData { return d }),
-		pipz.Transform("proc2", func(_ context.Context, d TestData) TestData { return d }),
-		pipz.Transform("proc3", func(_ context.Context, d TestData) TestData { return d }),
+		pipz.Transform(proc1ID, func(_ context.Context, d TestData) TestData { return d }),
+		pipz.Transform(proc2ID, func(_ context.Context, d TestData) TestData { return d }),
+		pipz.Transform(proc3ID, func(_ context.Context, d TestData) TestData { return d }),
 	)
 
 	// Remove one processor
@@ -789,8 +831,8 @@ func TestComponentRemoval(t *testing.T) {
 
 	// Test predicate removal
 	factory.AddPredicate(
-		flume.Predicate[TestData]{Name: "pred1", Predicate: func(_ context.Context, _ TestData) bool { return true }},
-		flume.Predicate[TestData]{Name: "pred2", Predicate: func(_ context.Context, _ TestData) bool { return false }},
+		flume.Predicate[TestData]{Identity: pred1ID, Predicate: func(_ context.Context, _ TestData) bool { return true }},
+		flume.Predicate[TestData]{Identity: pred2ID, Predicate: func(_ context.Context, _ TestData) bool { return false }},
 	)
 
 	count = factory.RemovePredicate("pred1", "pred2")
@@ -800,7 +842,7 @@ func TestComponentRemoval(t *testing.T) {
 
 	// Test condition removal
 	factory.AddCondition(
-		flume.Condition[TestData]{Name: "cond1", Condition: func(_ context.Context, _ TestData) string { return "a" }},
+		flume.Condition[TestData]{Identity: cond1ID, Condition: func(_ context.Context, _ TestData) string { return "a" }},
 	)
 
 	count = factory.RemoveCondition("cond1")
@@ -812,13 +854,17 @@ func TestComponentRemoval(t *testing.T) {
 func BenchmarkBuild(b *testing.B) {
 	factory := flume.New[TestData]()
 
+	// Define identities
+	step1ID := factory.Identity("step1", "First benchmark step")
+	step2ID := factory.Identity("step2", "Second benchmark step")
+
 	// Register processors
 	factory.Add(
-		pipz.Transform("step1", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_1"
 			return d
 		}),
-		pipz.Transform("step2", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
 			d.Counter++
 			return d
 		}),
@@ -847,6 +893,9 @@ func BenchmarkBuild(b *testing.B) {
 func BenchmarkConcurrentOperations(b *testing.B) {
 	factory := flume.New[TestData]()
 
+	// Define identity once
+	testID := factory.Identity("test", "Test processor for concurrent benchmark")
+
 	// Simple schema
 	schema := flume.Schema{
 		Node: flume.Node{Ref: "test"},
@@ -856,7 +905,7 @@ func BenchmarkConcurrentOperations(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			// Add a processor
-			factory.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+			factory.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 				return d
 			}))
 
@@ -866,6 +915,60 @@ func BenchmarkConcurrentOperations(b *testing.B) {
 				// Only remove if build succeeded (processor exists)
 				factory.Remove("test")
 			}
+		}
+	})
+}
+
+func TestChannelFactory(t *testing.T) {
+	t.Run("add and get channel", func(t *testing.T) {
+		factory := flume.New[TestData]()
+		channel := make(chan TestData, 10)
+
+		// Add channel
+		factory.AddChannel("test-channel", channel)
+
+		// Check HasChannel
+		if !factory.HasChannel("test-channel") {
+			t.Error("expected channel to exist")
+		}
+
+		// Get channel
+		retrieved, exists := factory.GetChannel("test-channel")
+		if !exists {
+			t.Error("expected channel to exist")
+		}
+		if retrieved == nil {
+			t.Error("expected to get non-nil channel")
+		}
+
+		// List channels
+		channels := factory.ListChannels()
+		if len(channels) != 1 || channels[0] != "test-channel" {
+			t.Errorf("expected ['test-channel'], got %v", channels)
+		}
+	})
+
+	t.Run("remove channel", func(t *testing.T) {
+		factory := flume.New[TestData]()
+		channel := make(chan TestData, 10)
+
+		factory.AddChannel("test-channel", channel)
+
+		// Remove channel
+		removed := factory.RemoveChannel("test-channel")
+		if !removed {
+			t.Error("expected channel to be removed")
+		}
+
+		// Verify it's gone
+		if factory.HasChannel("test-channel") {
+			t.Error("expected channel to not exist")
+		}
+
+		// Remove again should return false
+		removed = factory.RemoveChannel("test-channel")
+		if removed {
+			t.Error("expected false for non-existent channel")
 		}
 	})
 }

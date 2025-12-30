@@ -2,17 +2,30 @@ package flume_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/zoobzio/flume"
 	"gopkg.in/yaml.v3"
 )
 
+// jsonEqual compares two JSON strings for semantic equality.
+func jsonEqual(a, b string) bool {
+	var objA, objB any
+	if err := json.Unmarshal([]byte(a), &objA); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(b), &objB); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(objA, objB)
+}
+
 func TestSchemaJSONMarshaling(t *testing.T) {
 	tests := []struct {
 		name   string
-		schema flume.Schema
 		want   string
+		schema flume.Schema
 	}{
 		{
 			name: "simple ref schema",
@@ -74,7 +87,7 @@ func TestSchemaJSONMarshaling(t *testing.T) {
 				t.Fatalf("Failed to marshal schema: %v", err)
 			}
 
-			if string(data) != tt.want {
+			if !jsonEqual(string(data), tt.want) {
 				t.Errorf("JSON mismatch\ngot:  %s\nwant: %s", string(data), tt.want)
 			}
 
@@ -90,7 +103,7 @@ func TestSchemaJSONMarshaling(t *testing.T) {
 				t.Fatalf("Failed to re-marshal schema: %v", err)
 			}
 
-			if string(data2) != tt.want {
+			if !jsonEqual(string(data2), tt.want) {
 				t.Errorf("Round trip failed\ngot:  %s\nwant: %s", string(data2), tt.want)
 			}
 		})
@@ -100,8 +113,8 @@ func TestSchemaJSONMarshaling(t *testing.T) {
 func TestSchemaYAMLMarshaling(t *testing.T) {
 	tests := []struct {
 		name   string
-		schema flume.Schema
 		want   string
+		schema flume.Schema
 	}{
 		{
 			name: "simple ref schema",
@@ -162,11 +175,11 @@ children:
 			if tt.schema.Version != "" && unmarshaled.Version != tt.schema.Version {
 				t.Errorf("Version mismatch: got %s, want %s", unmarshaled.Version, tt.schema.Version)
 			}
-			if unmarshaled.Node.Ref != tt.schema.Node.Ref {
-				t.Errorf("Ref mismatch: got %s, want %s", unmarshaled.Node.Ref, tt.schema.Node.Ref)
+			if unmarshaled.Ref != tt.schema.Ref {
+				t.Errorf("Ref mismatch: got %s, want %s", unmarshaled.Ref, tt.schema.Ref)
 			}
-			if unmarshaled.Node.Type != tt.schema.Node.Type {
-				t.Errorf("Type mismatch: got %s, want %s", unmarshaled.Node.Type, tt.schema.Node.Type)
+			if unmarshaled.Type != tt.schema.Type {
+				t.Errorf("Type mismatch: got %s, want %s", unmarshaled.Type, tt.schema.Type)
 			}
 		})
 	}
@@ -215,7 +228,7 @@ func TestSchemaYAMLInline(t *testing.T) {
 		Version: "1.0.0",
 		Node: flume.Node{
 			Type: "sequence",
-			Name: "test",
+			Name: "test-sequence",
 			Children: []flume.Node{
 				{Ref: "proc1"},
 			},
@@ -347,8 +360,8 @@ func TestNodeDurationFields(t *testing.T) {
 }
 
 // Helper to check if YAML contains a line starting with the given prefix.
-func containsYAML(yaml, prefix string) bool {
-	lines := splitLines(yaml)
+func containsYAML(content, prefix string) bool {
+	lines := splitLines(content)
 	for _, line := range lines {
 		trimmed := trimLeft(line)
 		if hasPrefix(trimmed, prefix) {

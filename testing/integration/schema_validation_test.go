@@ -13,8 +13,11 @@ import (
 func TestSchemaValidation_ComprehensiveErrors(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	existingProcessorID := factory.Identity("existing-processor", "Pass-through processor for validation error tests")
+
 	// Register some processors for partial validation
-	factory.Add(pipz.Transform("existing-processor", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	factory.Add(pipz.Transform(existingProcessorID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		return d
 	}))
 
@@ -156,16 +159,23 @@ children:
 func TestSchemaValidation_ValidSchemas(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	validateID := factory.Identity("validate", "Validates data by passing through")
+	enrichID := factory.Identity("enrich", "Enriches data by incrementing value")
+	formatID := factory.Identity("format", "Formats data by uppercasing name")
+	isValidID := factory.Identity("is-valid", "Predicate that checks if ID is positive")
+	getStatusID := factory.Identity("get-status", "Condition that returns high/low based on value")
+
 	// Register processors
 	factory.Add(
-		pipz.Transform("validate", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(validateID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}),
-		pipz.Transform("enrich", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(enrichID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Value += 1.0
 			return d
 		}),
-		pipz.Transform("format", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(formatID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Name = strings.ToUpper(d.Name)
 			return d
 		}),
@@ -173,7 +183,7 @@ func TestSchemaValidation_ValidSchemas(t *testing.T) {
 
 	// Register predicates
 	factory.AddPredicate(flume.Predicate[flumetesting.TestData]{
-		Name: "is-valid",
+		Identity: isValidID,
 		Predicate: func(_ context.Context, d flumetesting.TestData) bool {
 			return d.ID > 0
 		},
@@ -181,7 +191,7 @@ func TestSchemaValidation_ValidSchemas(t *testing.T) {
 
 	// Register conditions
 	factory.AddCondition(flume.Condition[flumetesting.TestData]{
-		Name: "get-status",
+		Identity: getStatusID,
 		Condition: func(_ context.Context, d flumetesting.TestData) string {
 			if d.Value > 100 {
 				return "high"
@@ -338,14 +348,19 @@ func TestSchemaValidation_CycleDetection(t *testing.T) {
 
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	processorAID := factory.Identity("processor-a", "Processor A for cycle detection test")
+	processorBID := factory.Identity("processor-b", "Processor B for cycle detection test")
+	processorCID := factory.Identity("processor-c", "Processor C for cycle detection test")
+
 	factory.Add(
-		pipz.Transform("processor-a", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(processorAID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}),
-		pipz.Transform("processor-b", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(processorBID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}),
-		pipz.Transform("processor-c", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(processorCID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}),
 	)
@@ -382,8 +397,11 @@ children:
 func TestSchemaValidation_ChannelIntegration(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	processID := factory.Identity("process", "Processor that doubles the value")
+
 	// Register processor
-	factory.Add(pipz.Transform("process", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	factory.Add(pipz.Transform(processID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		d.Value *= 2
 		return d
 	}))
@@ -447,7 +465,10 @@ children:
 func TestSchemaValidation_ErrorPathAccuracy(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("valid", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	// Define identities upfront
+	validID := factory.Identity("valid", "Valid processor for error path accuracy test")
+
+	factory.Add(pipz.Transform(validID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		return d
 	}))
 
@@ -481,11 +502,15 @@ children:
 func TestSchemaValidation_JSONFormat(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
+	// Define identities upfront
+	processAID := factory.Identity("process-a", "Processor A for JSON format test")
+	processBID := factory.Identity("process-b", "Processor B for JSON format test")
+
 	factory.Add(
-		pipz.Transform("process-a", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(processAID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}),
-		pipz.Transform("process-b", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(processBID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}),
 	)
@@ -514,7 +539,10 @@ func TestSchemaValidation_JSONFormat(t *testing.T) {
 func TestSchemaValidation_VersionTracking(t *testing.T) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("process", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	// Define identities upfront
+	processID := factory.Identity("process", "Processor for version tracking test")
+
+	factory.Add(pipz.Transform(processID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		return d
 	}))
 

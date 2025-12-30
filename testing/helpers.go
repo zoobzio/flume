@@ -72,7 +72,7 @@ func (d TestData) Clone() TestData {
 type TestFactory[T pipz.Cloner[T]] struct {
 	*flume.Factory[T]
 	t              *testing.T
-	processorCalls map[pipz.Name]*int64
+	processorCalls map[string]*int64
 	mu             sync.RWMutex
 }
 
@@ -81,7 +81,7 @@ func NewTestFactory[T pipz.Cloner[T]](t *testing.T) *TestFactory[T] {
 	return &TestFactory[T]{
 		Factory:        flume.New[T](),
 		t:              t,
-		processorCalls: make(map[pipz.Name]*int64),
+		processorCalls: make(map[string]*int64),
 	}
 }
 
@@ -89,42 +89,45 @@ func NewTestFactory[T pipz.Cloner[T]](t *testing.T) *TestFactory[T] {
 func (f *TestFactory[T]) AddProcessor(name string, fn func(context.Context, T) (T, error)) {
 	f.mu.Lock()
 	counter := new(int64)
-	f.processorCalls[pipz.Name(name)] = counter
+	f.processorCalls[name] = counter
 	f.mu.Unlock()
 
-	processor := pipz.Apply(pipz.Name(name), func(ctx context.Context, data T) (T, error) {
+	id := f.Identity(name, "Test processor: "+name)
+	processor := pipz.Apply(id, func(ctx context.Context, data T) (T, error) {
 		atomic.AddInt64(counter, 1)
 		return fn(ctx, data)
 	})
-	f.Factory.Add(processor)
+	f.Add(processor)
 }
 
 // AddTransform adds a transform processor with call tracking.
 func (f *TestFactory[T]) AddTransform(name string, fn func(context.Context, T) T) {
 	f.mu.Lock()
 	counter := new(int64)
-	f.processorCalls[pipz.Name(name)] = counter
+	f.processorCalls[name] = counter
 	f.mu.Unlock()
 
-	processor := pipz.Transform(pipz.Name(name), func(ctx context.Context, data T) T {
+	id := f.Identity(name, "Test transform: "+name)
+	processor := pipz.Transform(id, func(ctx context.Context, data T) T {
 		atomic.AddInt64(counter, 1)
 		return fn(ctx, data)
 	})
-	f.Factory.Add(processor)
+	f.Add(processor)
 }
 
 // AddEffect adds an effect processor with call tracking.
 func (f *TestFactory[T]) AddEffect(name string, fn func(context.Context, T) error) {
 	f.mu.Lock()
 	counter := new(int64)
-	f.processorCalls[pipz.Name(name)] = counter
+	f.processorCalls[name] = counter
 	f.mu.Unlock()
 
-	processor := pipz.Effect(pipz.Name(name), func(ctx context.Context, data T) error {
+	id := f.Identity(name, "Test effect: "+name)
+	processor := pipz.Effect(id, func(ctx context.Context, data T) error {
 		atomic.AddInt64(counter, 1)
 		return fn(ctx, data)
 	})
-	f.Factory.Add(processor)
+	f.Add(processor)
 }
 
 // CallCount returns the number of times a processor was called.
@@ -132,7 +135,7 @@ func (f *TestFactory[T]) CallCount(name string) int64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	if counter, ok := f.processorCalls[pipz.Name(name)]; ok {
+	if counter, ok := f.processorCalls[name]; ok {
 		return atomic.LoadInt64(counter)
 	}
 	return 0
@@ -284,7 +287,7 @@ func (b *SchemaBuilder) indent() string {
 type MockProcessor[T any] struct {
 	returnVal   T
 	returnErr   error
-	name        pipz.Name
+	identity    pipz.Identity
 	panicMsg    string
 	callHistory []MockCall[T]
 	callCount   int64
@@ -303,7 +306,7 @@ type MockCall[T any] struct {
 // NewMockProcessor creates a new mock processor for testing.
 func NewMockProcessor[T any](name string) *MockProcessor[T] {
 	return &MockProcessor[T]{
-		name:       pipz.Name(name),
+		identity:   pipz.NewIdentity(name, "Mock processor: "+name),
 		maxHistory: 100,
 	}
 }
@@ -333,9 +336,9 @@ func (m *MockProcessor[T]) WithPanic(msg string) *MockProcessor[T] {
 	return m
 }
 
-// Name returns the name of the mock processor.
-func (m *MockProcessor[T]) Name() pipz.Name {
-	return m.name
+// Identity returns the identity of the mock processor.
+func (m *MockProcessor[T]) Identity() pipz.Identity {
+	return m.identity
 }
 
 // Process implements pipz.Chainable[T].
@@ -409,8 +412,9 @@ func (h *BenchmarkHelper[T]) Factory() *flume.Factory[T] {
 // RegisterNoOpProcessors registers n no-op processors for benchmarking registration overhead.
 func (h *BenchmarkHelper[T]) RegisterNoOpProcessors(n int) {
 	for i := 0; i < n; i++ {
-		name := pipz.Name(fmt.Sprintf("noop-%d", i))
-		processor := pipz.Transform(name, func(_ context.Context, data T) T {
+		name := fmt.Sprintf("noop-%d", i)
+		id := h.factory.Identity(name, "No-op benchmark processor")
+		processor := pipz.Transform(id, func(_ context.Context, data T) T {
 			return data
 		})
 		h.factory.Add(processor)

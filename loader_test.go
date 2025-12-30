@@ -16,10 +16,18 @@ func TestBuildFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	t.Cleanup(func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Logf("cleanup: failed to remove temp dir: %v", err)
+		}
+	})
 
 	factory := flume.New[TestData]()
-	factory.Add(pipz.Transform("test-processor", func(_ context.Context, d TestData) TestData {
+
+	// Define identities upfront
+	testProcessorID := factory.Identity("test-processor", "Processor for file loading tests")
+
+	factory.Add(pipz.Transform(testProcessorID, func(_ context.Context, d TestData) TestData {
 		d.Value = "file-processed"
 		return d
 	}))
@@ -28,12 +36,12 @@ func TestBuildFromFile(t *testing.T) {
 		name          string
 		fileName      string
 		content       string
-		expectError   bool
 		errorContains string
+		expectError   bool
 	}{
 		{
 			name:     "valid JSON file",
-			fileName: "schema.json",
+			fileName: "test.json",
 			content:  `{"ref": "test-processor"}`,
 		},
 		{
@@ -43,12 +51,12 @@ func TestBuildFromFile(t *testing.T) {
 		},
 		{
 			name:     "valid YAML file",
-			fileName: "schema.yaml",
+			fileName: "test.yaml",
 			content:  "ref: test-processor",
 		},
 		{
 			name:     "valid YML file",
-			fileName: "schema.yml",
+			fileName: "test.yml",
 			content:  "ref: test-processor",
 		},
 		{
@@ -90,14 +98,14 @@ children:
 		},
 		{
 			name:          "unsupported file type",
-			fileName:      "schema.txt",
+			fileName:      "unsupported.txt",
 			content:       "ref: test-processor",
 			expectError:   true,
 			errorContains: "unsupported file format: .txt",
 		},
 		{
 			name:          "non-existent file",
-			fileName:      "doesnotexist.json",
+			fileName:      "nonexistent.yaml",
 			content:       "", // won't be created
 			expectError:   true,
 			errorContains: "failed to read file",
@@ -161,16 +169,21 @@ children:
 func TestBuildFromJSON(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	jsonProcID := factory.Identity("json-proc", "JSON processor for loading tests")
+	step1ID := factory.Identity("step1", "Step 1 processor")
+	step2ID := factory.Identity("step2", "Step 2 processor")
+
 	factory.Add(
-		pipz.Transform("json-proc", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(jsonProcID, func(_ context.Context, d TestData) TestData {
 			d.Value = "json-result"
 			return d
 		}),
-		pipz.Transform("step1", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_1"
 			return d
 		}),
-		pipz.Transform("step2", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_2"
 			return d
 		}),
@@ -180,8 +193,8 @@ func TestBuildFromJSON(t *testing.T) {
 		name          string
 		json          string
 		expectedValue string
-		expectError   bool
 		errorContains string
+		expectError   bool
 	}{
 		{
 			name:          "simple processor reference",
@@ -280,23 +293,29 @@ func TestBuildFromJSON(t *testing.T) {
 func TestBuildFromYAML(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	yamlProcID := factory.Identity("yaml-proc", "YAML processor for loading tests")
+	step1ID := factory.Identity("step1", "Step 1 processor")
+	step2ID := factory.Identity("step2", "Step 2 processor")
+	isEmptyID := factory.Identity("is-empty", "Returns true when value is empty")
+
 	factory.Add(
-		pipz.Transform("yaml-proc", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(yamlProcID, func(_ context.Context, d TestData) TestData {
 			d.Value = "yaml-result"
 			return d
 		}),
-		pipz.Transform("step1", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_1"
 			return d
 		}),
-		pipz.Transform("step2", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_2"
 			return d
 		}),
 	)
 
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name: "is-empty",
+		Identity: isEmptyID,
 		Predicate: func(_ context.Context, d TestData) bool {
 			return d.Value == ""
 		},
@@ -306,8 +325,8 @@ func TestBuildFromYAML(t *testing.T) {
 		name          string
 		yaml          string
 		expectedValue string
-		expectError   bool
 		errorContains string
+		expectError   bool
 	}{
 		{
 			name:          "simple processor reference",
@@ -412,14 +431,21 @@ children:
 func TestLoaderEdgeCases(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	testID := factory.Identity("test", "Test processor for edge cases")
+
 	t.Run("BuildFromFile with uppercase extensions", func(t *testing.T) {
 		tempDir, err := os.MkdirTemp("", "flume-test-uppercase-*")
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
-		defer os.RemoveAll(tempDir)
+		t.Cleanup(func() {
+			if err := os.RemoveAll(tempDir); err != nil {
+				t.Logf("cleanup: failed to remove temp dir: %v", err)
+			}
+		})
 
-		factory.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+		factory.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 			d.Value = "uppercase"
 			return d
 		}))
@@ -458,7 +484,11 @@ func TestLoaderEdgeCases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
-		defer os.RemoveAll(tempDir)
+		t.Cleanup(func() {
+			if err := os.RemoveAll(tempDir); err != nil {
+				t.Logf("cleanup: failed to remove temp dir: %v", err)
+			}
+		})
 
 		// Test mixed case
 		filePath := filepath.Join(tempDir, "schema.JsOn")
@@ -486,7 +516,11 @@ func TestLoaderEdgeCases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
-		defer os.RemoveAll(tempDir)
+		t.Cleanup(func() {
+			if err := os.RemoveAll(tempDir); err != nil {
+				t.Logf("cleanup: failed to remove temp dir: %v", err)
+			}
+		})
 
 		filePath := filepath.Join(tempDir, "noperms.json")
 		if err := os.WriteFile(filePath, []byte(`{"ref": "test"}`), 0o000); err != nil {

@@ -13,17 +13,22 @@ import (
 func TestBuildSequence(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	step1ID := factory.Identity("step1", "Appends _1 suffix to value")
+	step2ID := factory.Identity("step2", "Appends _2 suffix to value")
+	step3ID := factory.Identity("step3", "Appends _3 suffix to value")
+
 	// Register test processors
 	factory.Add(
-		pipz.Transform("step1", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_1"
 			return d
 		}),
-		pipz.Transform("step2", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_2"
 			return d
 		}),
-		pipz.Transform("step3", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(step3ID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_3"
 			return d
 		}),
@@ -31,11 +36,11 @@ func TestBuildSequence(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errorMsg    string
 		schema      flume.Schema
 		input       TestData
 		expected    TestData
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "basic sequence",
@@ -127,13 +132,17 @@ func TestBuildSequence(t *testing.T) {
 func TestBuildConcurrent(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	addSuffixID := factory.Identity("add-suffix", "Appends _concurrent suffix to value")
+	incrementID := factory.Identity("increment", "Increments counter by 10")
+
 	// Register test processors that modify different fields
 	factory.Add(
-		pipz.Transform("add-suffix", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(addSuffixID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_concurrent"
 			return d
 		}),
-		pipz.Transform("increment", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(incrementID, func(_ context.Context, d TestData) TestData {
 			d.Counter += 10
 			return d
 		}),
@@ -141,9 +150,9 @@ func TestBuildConcurrent(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errorMsg    string
 		schema      flume.Schema
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "basic concurrent",
@@ -210,12 +219,16 @@ func TestBuildConcurrent(t *testing.T) {
 func TestBuildRace(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	fastID := factory.Identity("fast", "Sets value to fast")
+	slowID := factory.Identity("slow", "Sets value to slow")
+
 	factory.Add(
-		pipz.Transform("fast", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(fastID, func(_ context.Context, d TestData) TestData {
 			d.Value = "fast"
 			return d
 		}),
-		pipz.Transform("slow", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(slowID, func(_ context.Context, d TestData) TestData {
 			d.Value = "slow"
 			return d
 		}),
@@ -223,9 +236,9 @@ func TestBuildRace(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errorMsg    string
 		schema      flume.Schema
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "basic race",
@@ -297,17 +310,22 @@ func TestBuildRace(t *testing.T) {
 func TestBuildFallback(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	failingID := factory.Identity("failing", "Always fails with error")
+	fallbackID := factory.Identity("fallback", "Fallback processor sets value to fallback")
+	successID := factory.Identity("success", "Sets value to primary")
+
 	errorCount := 0
 	factory.Add(
-		pipz.Apply("failing", func(_ context.Context, d TestData) (TestData, error) {
+		pipz.Apply(failingID, func(_ context.Context, d TestData) (TestData, error) {
 			errorCount++
 			return d, errors.New("primary failed")
 		}),
-		pipz.Transform("fallback", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(fallbackID, func(_ context.Context, d TestData) TestData {
 			d.Value = "fallback"
 			return d
 		}),
-		pipz.Transform("success", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(successID, func(_ context.Context, d TestData) TestData {
 			d.Value = "primary"
 			return d
 		}),
@@ -315,10 +333,10 @@ func TestBuildFallback(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		schema      flume.Schema
 		expected    string
-		expectError bool
 		errorMsg    string
+		schema      flume.Schema
+		expectError bool
 	}{
 		{
 			name: "fallback activates on error",
@@ -423,19 +441,20 @@ func TestBuildRetry(t *testing.T) {
 	factory := flume.New[TestData]()
 
 	tests := []struct {
-		name          string
-		schema        flume.Schema
 		setupFactory  func()
+		name          string
 		expected      string
-		expectError   bool
 		errorMsg      string
+		schema        flume.Schema
 		checkAttempts int
+		expectError   bool
 	}{
 		{
 			name: "retry succeeds after failures",
 			setupFactory: func() {
+				flakyID := factory.Identity("flaky", "Fails twice then succeeds")
 				attempts := 0
-				factory.Add(pipz.Apply("flaky", func(_ context.Context, d TestData) (TestData, error) {
+				factory.Add(pipz.Apply(flakyID, func(_ context.Context, d TestData) (TestData, error) {
 					attempts++
 					if attempts < 3 {
 						return d, errors.New("temporary failure")
@@ -456,7 +475,8 @@ func TestBuildRetry(t *testing.T) {
 		{
 			name: "retry with default attempts",
 			setupFactory: func() {
-				factory.Add(pipz.Transform("stable", func(_ context.Context, d TestData) TestData {
+				stableID := factory.Identity("stable", "Stable processor for retry tests")
+				factory.Add(pipz.Transform(stableID, func(_ context.Context, d TestData) TestData {
 					d.Value = "default"
 					return d
 				}))
@@ -472,7 +492,8 @@ func TestBuildRetry(t *testing.T) {
 		{
 			name: "retry with custom name",
 			setupFactory: func() {
-				factory.Add(pipz.Transform("stable", func(_ context.Context, d TestData) TestData {
+				stableID := factory.Identity("stable", "Stable processor for retry tests")
+				factory.Add(pipz.Transform(stableID, func(_ context.Context, d TestData) TestData {
 					d.Value = "custom"
 					return d
 				}))
@@ -489,7 +510,8 @@ func TestBuildRetry(t *testing.T) {
 		{
 			name: "backoff retry",
 			setupFactory: func() {
-				factory.Add(pipz.Transform("backoff-proc", func(_ context.Context, d TestData) TestData {
+				backoffProcID := factory.Identity("backoff-proc", "Processor with backoff delay")
+				factory.Add(pipz.Transform(backoffProcID, func(_ context.Context, d TestData) TestData {
 					d.Value = "backoff"
 					return d
 				}))
@@ -507,7 +529,8 @@ func TestBuildRetry(t *testing.T) {
 		{
 			name: "backoff with custom name",
 			setupFactory: func() {
-				factory.Add(pipz.Transform("backoff-proc", func(_ context.Context, d TestData) TestData {
+				backoffProcID := factory.Identity("backoff-proc", "Processor with backoff delay")
+				factory.Add(pipz.Transform(backoffProcID, func(_ context.Context, d TestData) TestData {
 					d.Value = "backoff-custom"
 					return d
 				}))
@@ -537,7 +560,8 @@ func TestBuildRetry(t *testing.T) {
 		{
 			name: "invalid backoff duration",
 			setupFactory: func() {
-				factory.Add(pipz.Transform("test", func(_ context.Context, d TestData) TestData {
+				testID := factory.Identity("test", "Test processor for invalid backoff")
+				factory.Add(pipz.Transform(testID, func(_ context.Context, d TestData) TestData {
 					return d
 				}))
 			},
@@ -590,12 +614,16 @@ func TestBuildRetry(t *testing.T) {
 func TestBuildTimeout(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	fastID := factory.Identity("fast", "Fast processor that completes immediately")
+	slowID := factory.Identity("slow", "Slow processor that takes 2 seconds")
+
 	factory.Add(
-		pipz.Transform("fast", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(fastID, func(_ context.Context, d TestData) TestData {
 			d.Value = "completed"
 			return d
 		}),
-		pipz.Apply("slow", func(ctx context.Context, d TestData) (TestData, error) {
+		pipz.Apply(slowID, func(ctx context.Context, d TestData) (TestData, error) {
 			select {
 			case <-time.After(2 * time.Second):
 				d.Value = "should-timeout"
@@ -608,10 +636,10 @@ func TestBuildTimeout(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		schema      flume.Schema
 		expected    string
-		expectError bool
 		errorMsg    string
+		schema      flume.Schema
+		expectError bool
 	}{
 		{
 			name: "timeout with fast processor",
@@ -701,12 +729,18 @@ func TestBuildTimeout(t *testing.T) {
 func TestBuildFilter(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	thenBranchID := factory.Identity("then-branch", "Executes when predicate is true")
+	elseBranchID := factory.Identity("else-branch", "Executes when predicate is false")
+	isPositiveID := factory.Identity("is-positive", "Returns true when counter is positive")
+	isHighID := factory.Identity("is-high", "Returns true when counter exceeds 10")
+
 	factory.Add(
-		pipz.Transform("then-branch", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(thenBranchID, func(_ context.Context, d TestData) TestData {
 			d.Value = "then"
 			return d
 		}),
-		pipz.Transform("else-branch", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(elseBranchID, func(_ context.Context, d TestData) TestData {
 			d.Value = "else"
 			return d
 		}),
@@ -714,13 +748,13 @@ func TestBuildFilter(t *testing.T) {
 
 	factory.AddPredicate(
 		flume.Predicate[TestData]{
-			Name: "is-positive",
+			Identity: isPositiveID,
 			Predicate: func(_ context.Context, d TestData) bool {
 				return d.Counter > 0
 			},
 		},
 		flume.Predicate[TestData]{
-			Name: "is-high",
+			Identity: isHighID,
 			Predicate: func(_ context.Context, d TestData) bool {
 				return d.Counter > 10
 			},
@@ -729,11 +763,11 @@ func TestBuildFilter(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		expected    string
+		errorMsg    string
 		schema      flume.Schema
 		input       TestData
-		expected    string
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "filter with then only - true condition",
@@ -865,16 +899,23 @@ func TestBuildFilter(t *testing.T) {
 func TestBuildSwitch(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	routeAID := factory.Identity("route-a", "Handler for route A")
+	routeBID := factory.Identity("route-b", "Handler for route B")
+	routeDefaultID := factory.Identity("route-default", "Default route handler")
+	valueRouterID := factory.Identity("value-router", "Routes based on value field")
+	counterRouterID := factory.Identity("counter-router", "Routes based on counter thresholds")
+
 	factory.Add(
-		pipz.Transform("route-a", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(routeAID, func(_ context.Context, d TestData) TestData {
 			d.Value = "route-a"
 			return d
 		}),
-		pipz.Transform("route-b", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(routeBID, func(_ context.Context, d TestData) TestData {
 			d.Value = "route-b"
 			return d
 		}),
-		pipz.Transform("route-default", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(routeDefaultID, func(_ context.Context, d TestData) TestData {
 			d.Value = "route-default"
 			return d
 		}),
@@ -882,7 +923,7 @@ func TestBuildSwitch(t *testing.T) {
 
 	factory.AddCondition(
 		flume.Condition[TestData]{
-			Name: "value-router",
+			Identity: valueRouterID,
 			Condition: func(_ context.Context, d TestData) string {
 				switch d.Value {
 				case "a":
@@ -895,7 +936,7 @@ func TestBuildSwitch(t *testing.T) {
 			},
 		},
 		flume.Condition[TestData]{
-			Name: "counter-router",
+			Identity: counterRouterID,
 			Condition: func(_ context.Context, d TestData) string {
 				if d.Counter < 5 {
 					return "low"
@@ -909,11 +950,11 @@ func TestBuildSwitch(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		expected    string
+		errorMsg    string
 		schema      flume.Schema
 		input       TestData
-		expected    string
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "switch basic routing",
@@ -1049,33 +1090,42 @@ func TestBuildSwitch(t *testing.T) {
 func TestBuildComplexNesting(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	prepID := factory.Identity("prep", "Prepares data for processing")
+	processHighID := factory.Identity("process-high", "Handles high counter values")
+	processLowID := factory.Identity("process-low", "Handles low counter values")
+	finalizeID := factory.Identity("finalize", "Finalizes the processed data")
+	mayFailID := factory.Identity("may-fail", "May fail if counter exceeds 20")
+	fallbackHandlerID := factory.Identity("fallback-handler", "Handles failures with fallback")
+	isHighID := factory.Identity("is-high", "Returns true when counter exceeds 10")
+
 	// Register processors
 	factory.Add(
-		pipz.Transform("prep", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(prepID, func(_ context.Context, d TestData) TestData {
 			d.Value = "prepared"
 			d.Counter = 15
 			return d
 		}),
-		pipz.Transform("process-high", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(processHighID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_high"
 			return d
 		}),
-		pipz.Transform("process-low", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(processLowID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_low"
 			return d
 		}),
-		pipz.Transform("finalize", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(finalizeID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_done"
 			return d
 		}),
-		pipz.Apply("may-fail", func(_ context.Context, d TestData) (TestData, error) {
+		pipz.Apply(mayFailID, func(_ context.Context, d TestData) (TestData, error) {
 			if d.Counter > 20 {
 				return d, errors.New("too high")
 			}
 			d.Value += "_checked"
 			return d, nil
 		}),
-		pipz.Transform("fallback-handler", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(fallbackHandlerID, func(_ context.Context, d TestData) TestData {
 			d.Value += "_fallback"
 			return d
 		}),
@@ -1083,7 +1133,7 @@ func TestBuildComplexNesting(t *testing.T) {
 
 	// Register predicates
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name: "is-high",
+		Identity: isHighID,
 		Predicate: func(_ context.Context, d TestData) bool {
 			return d.Counter > 10
 		},
@@ -1144,8 +1194,8 @@ func TestBuildNodeErrors(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		schema        flume.Schema
 		errorContains string
+		schema        flume.Schema
 	}{
 		{
 			name: "unknown node type",
@@ -1267,19 +1317,23 @@ func TestBuildNodeErrors(t *testing.T) {
 	}
 
 	// Add test predicate, condition and processor for some tests
+	testPredID := factory.Identity("test-pred", "Test predicate for error path tests")
+	testCondID := factory.Identity("test-cond", "Test condition for error path tests")
+	testProcID := factory.Identity("test-proc", "Test processor for error path tests")
+
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name: "test-pred",
+		Identity: testPredID,
 		Predicate: func(_ context.Context, _ TestData) bool {
 			return true
 		},
 	})
 	factory.AddCondition(flume.Condition[TestData]{
-		Name: "test-cond",
+		Identity: testCondID,
 		Condition: func(_ context.Context, _ TestData) string {
 			return "a"
 		},
 	})
-	factory.Add(pipz.Transform("test-proc", func(_ context.Context, d TestData) TestData {
+	factory.Add(pipz.Transform(testProcID, func(_ context.Context, d TestData) TestData {
 		return d
 	}))
 
@@ -1298,9 +1352,13 @@ func TestBuildNodeErrors(t *testing.T) {
 func TestBuildCircuitBreaker(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	failingID := factory.Identity("failing", "Fails first two attempts then succeeds")
+	stableID := factory.Identity("stable", "Stable processor for circuit breaker tests")
+
 	failureCount := 0
 	factory.Add(
-		pipz.Apply("failing", func(_ context.Context, d TestData) (TestData, error) {
+		pipz.Apply(failingID, func(_ context.Context, d TestData) (TestData, error) {
 			failureCount++
 			if failureCount < 3 {
 				return d, errors.New("service failure")
@@ -1308,7 +1366,7 @@ func TestBuildCircuitBreaker(t *testing.T) {
 			d.Value = "success"
 			return d, nil
 		}),
-		pipz.Transform("stable", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(stableID, func(_ context.Context, d TestData) TestData {
 			d.Value = "stable"
 			return d
 		}),
@@ -1316,10 +1374,10 @@ func TestBuildCircuitBreaker(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		schema      flume.Schema
 		expected    string
-		expectError bool
 		errorMsg    string
+		schema      flume.Schema
+		expectError bool
 	}{
 		{
 			name: "circuit breaker with stable processor",
@@ -1411,8 +1469,11 @@ func TestBuildCircuitBreaker(t *testing.T) {
 func TestBuildRateLimit(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	processorID := factory.Identity("processor", "Processor for rate limit tests")
+
 	factory.Add(
-		pipz.Transform("processor", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(processorID, func(_ context.Context, d TestData) TestData {
 			d.Value = "processed"
 			return d
 		}),
@@ -1420,10 +1481,10 @@ func TestBuildRateLimit(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		schema      flume.Schema
 		expected    string
-		expectError bool
 		errorMsg    string
+		schema      flume.Schema
+		expectError bool
 	}{
 		{
 			name: "rate limit with custom values",
@@ -1503,21 +1564,25 @@ func TestBuildRateLimit(t *testing.T) {
 func TestBuildConcurrentWithReducer(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	doubleID := factory.Identity("double", "Doubles the counter value")
+	tripleID := factory.Identity("triple", "Triples the counter value")
+	sumReducerID := factory.Identity("sum-reducer", "Sums counter values from all results")
+
 	factory.Add(
-		pipz.Transform("double", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(doubleID, func(_ context.Context, d TestData) TestData {
 			d.Counter *= 2
 			return d
 		}),
-		pipz.Transform("triple", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(tripleID, func(_ context.Context, d TestData) TestData {
 			d.Counter *= 3
 			return d
 		}),
 	)
 
 	factory.AddReducer(flume.Reducer[TestData]{
-		Name:        "sum-reducer",
-		Description: "Sums counter values from all results",
-		Reducer: func(original TestData, results map[pipz.Name]TestData, _ map[pipz.Name]error) TestData {
+		Identity: sumReducerID,
+		Reducer: func(original TestData, results map[pipz.Identity]TestData, _ map[pipz.Identity]error) TestData {
 			total := 0
 			for _, r := range results {
 				total += r.Counter
@@ -1529,11 +1594,11 @@ func TestBuildConcurrentWithReducer(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errorMsg    string
 		schema      flume.Schema
 		input       TestData
 		expected    int
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "concurrent with reducer",
@@ -1612,13 +1677,18 @@ func TestBuildConcurrentWithReducer(t *testing.T) {
 func TestBuildContest(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	winnerID := factory.Identity("winner", "Sets counter to 100")
+	loserID := factory.Identity("loser", "Sets counter to 50")
+	highestCounterID := factory.Identity("highest-counter", "Returns true when counter is 100 or more")
+
 	factory.Add(
-		pipz.Transform("winner", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(winnerID, func(_ context.Context, d TestData) TestData {
 			d.Value = "winner"
 			d.Counter = 100
 			return d
 		}),
-		pipz.Transform("loser", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(loserID, func(_ context.Context, d TestData) TestData {
 			d.Value = "loser"
 			d.Counter = 50
 			return d
@@ -1626,7 +1696,7 @@ func TestBuildContest(t *testing.T) {
 	)
 
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name: "highest-counter",
+		Identity: highestCounterID,
 		Predicate: func(_ context.Context, d TestData) bool {
 			return d.Counter >= 100
 		},
@@ -1634,10 +1704,10 @@ func TestBuildContest(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		schema      flume.Schema
 		expected    string
-		expectError bool
 		errorMsg    string
+		schema      flume.Schema
+		expectError bool
 	}{
 		{
 			name: "contest basic",
@@ -1738,20 +1808,25 @@ func TestBuildContest(t *testing.T) {
 func TestBuildHandle(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	failingID := factory.Identity("failing", "Always fails with intentional error")
+	stableID := factory.Identity("stable", "Stable processor for handle tests")
+	logHandlerID := factory.Identity("log-handler", "Logs errors and marks as handled")
+	errorHandlerID := factory.Identity("error-handler", "Internal error handler processor")
+
 	factory.Add(
-		pipz.Apply("failing", func(_ context.Context, d TestData) (TestData, error) {
+		pipz.Apply(failingID, func(_ context.Context, d TestData) (TestData, error) {
 			return d, errors.New("intentional failure")
 		}),
-		pipz.Transform("stable", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(stableID, func(_ context.Context, d TestData) TestData {
 			d.Value = "stable"
 			return d
 		}),
 	)
 
 	factory.AddErrorHandler(flume.ErrorHandler[TestData]{
-		Name:        "log-handler",
-		Description: "Logs errors and marks as handled",
-		Handler: pipz.Transform("error-handler", func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+		Identity: logHandlerID,
+		Handler: pipz.Transform(errorHandlerID, func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
 			e.InputData.Value = "handled"
 			return e
 		}),
@@ -1759,10 +1834,10 @@ func TestBuildHandle(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		schema      flume.Schema
 		expected    string
-		expectError bool
 		errorMsg    string
+		schema      flume.Schema
+		expectError bool
 	}{
 		{
 			name: "handle with stable processor",
@@ -1854,14 +1929,18 @@ func TestBuildHandle(t *testing.T) {
 func TestBuildScaffold(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	backgroundTaskID := factory.Identity("background-task", "Background task processor")
+	anotherTaskID := factory.Identity("another-task", "Another background task")
+
 	executed := make(chan bool, 2)
 	factory.Add(
-		pipz.Transform("background-task", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(backgroundTaskID, func(_ context.Context, d TestData) TestData {
 			executed <- true
 			d.Value = "background"
 			return d
 		}),
-		pipz.Transform("another-task", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(anotherTaskID, func(_ context.Context, d TestData) TestData {
 			executed <- true
 			d.Value = "another"
 			return d
@@ -1870,9 +1949,9 @@ func TestBuildScaffold(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errorMsg    string
 		schema      flume.Schema
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "scaffold basic",
@@ -1942,8 +2021,11 @@ func TestBuildScaffold(t *testing.T) {
 func TestBuildWorkerPool(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	workerTaskID := factory.Identity("worker-task", "Worker task processor")
+
 	factory.Add(
-		pipz.Transform("worker-task", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(workerTaskID, func(_ context.Context, d TestData) TestData {
 			d.Value = "processed"
 			d.Counter++
 			return d
@@ -1952,9 +2034,9 @@ func TestBuildWorkerPool(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		errorMsg    string
 		schema      flume.Schema
 		expectError bool
-		errorMsg    string
 	}{
 		{
 			name: "worker pool basic",
@@ -2038,19 +2120,21 @@ func TestBuildWorkerPool(t *testing.T) {
 func TestReducerRegistration(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	testReducerID := factory.Identity("test-reducer", "Test reducer for registration tests")
+	anotherReducerID := factory.Identity("another-reducer", "Another reducer for registration tests")
+
 	// Test AddReducer
 	factory.AddReducer(
 		flume.Reducer[TestData]{
-			Name:        "test-reducer",
-			Description: "Test reducer",
-			Reducer: func(original TestData, _ map[pipz.Name]TestData, _ map[pipz.Name]error) TestData {
+			Identity: testReducerID,
+			Reducer: func(original TestData, _ map[pipz.Identity]TestData, _ map[pipz.Identity]error) TestData {
 				return original
 			},
 		},
 		flume.Reducer[TestData]{
-			Name:        "another-reducer",
-			Description: "Another reducer",
-			Reducer: func(original TestData, _ map[pipz.Name]TestData, _ map[pipz.Name]error) TestData {
+			Identity: anotherReducerID,
+			Reducer: func(original TestData, _ map[pipz.Identity]TestData, _ map[pipz.Identity]error) TestData {
 				return original
 			},
 		},
@@ -2080,19 +2164,23 @@ func TestReducerRegistration(t *testing.T) {
 func TestErrorHandlerRegistration(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront
+	testHandlerID := factory.Identity("test-handler", "Test handler for registration tests")
+	handlerID := factory.Identity("handler", "Internal handler processor")
+	anotherHandlerID := factory.Identity("another-handler", "Another handler for registration tests")
+	handler2ID := factory.Identity("handler2", "Internal handler processor 2")
+
 	// Test AddErrorHandler
 	factory.AddErrorHandler(
 		flume.ErrorHandler[TestData]{
-			Name:        "test-handler",
-			Description: "Test handler",
-			Handler: pipz.Transform("handler", func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+			Identity: testHandlerID,
+			Handler: pipz.Transform(handlerID, func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
 				return e
 			}),
 		},
 		flume.ErrorHandler[TestData]{
-			Name:        "another-handler",
-			Description: "Another handler",
-			Handler: pipz.Transform("handler2", func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+			Identity: anotherHandlerID,
+			Handler: pipz.Transform(handler2ID, func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
 				return e
 			}),
 		},
@@ -2119,28 +2207,302 @@ func TestErrorHandlerRegistration(t *testing.T) {
 	}
 }
 
+func TestBuildStream(t *testing.T) {
+	t.Run("stream with timeout succeeds when channel has capacity", func(t *testing.T) {
+		factory := flume.New[TestData]()
+		channel := make(chan TestData, 10)
+		factory.AddChannel("test-channel", channel)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Stream:        "test-channel",
+				StreamTimeout: "1s",
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "test"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result.Value != "test" {
+			t.Errorf("expected 'test', got '%s'", result.Value)
+		}
+
+		// Verify channel received data
+		select {
+		case received := <-channel:
+			if received.Value != "test" {
+				t.Errorf("expected 'test', got '%s'", received.Value)
+			}
+		default:
+			t.Error("channel didn't receive expected data")
+		}
+	})
+
+	t.Run("stream with timeout fails when channel is full", func(t *testing.T) {
+		factory := flume.New[TestData]()
+		channel := make(chan TestData) // unbuffered, will block
+		factory.AddChannel("blocked-channel", channel)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Stream:        "blocked-channel",
+				StreamTimeout: "50ms",
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "test"}
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected timeout error but got none")
+		}
+		if !contains(err.Error(), "write timeout") {
+			t.Errorf("expected timeout error, got: %v", err)
+		}
+	})
+
+	t.Run("stream without timeout respects context cancellation", func(t *testing.T) {
+		factory := flume.New[TestData]()
+		channel := make(chan TestData) // unbuffered, will block
+		factory.AddChannel("blocked-channel", channel)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Stream: "blocked-channel",
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		input := TestData{Value: "test"}
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected context error but got none")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("expected context.DeadlineExceeded, got: %v", err)
+		}
+	})
+
+	t.Run("stream timeout validation", func(t *testing.T) {
+		factory := flume.New[TestData]()
+		channel := make(chan TestData, 10)
+		factory.AddChannel("test-channel", channel)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Stream:        "test-channel",
+				StreamTimeout: "invalid",
+			},
+		}
+
+		err := factory.ValidateSchema(schema)
+		if err == nil {
+			t.Fatal("expected validation error but got none")
+		}
+		if !contains(err.Error(), "invalid stream_timeout") {
+			t.Errorf("expected stream_timeout validation error, got: %v", err)
+		}
+	})
+}
+
+func TestStreamIntegration(t *testing.T) {
+	t.Run("pipeline ending with stream", func(t *testing.T) {
+		factory := flume.New[TestData]()
+
+		// Define identities
+		validateID := factory.Identity("validate", "Validates data is not empty")
+		enrichID := factory.Identity("enrich", "Enriches data with prefix")
+
+		// Add processors
+		factory.Add(
+			pipz.Apply(validateID, func(_ context.Context, d TestData) (TestData, error) {
+				if d.Value == "" {
+					return d, errors.New("empty value")
+				}
+				return d, nil
+			}),
+			pipz.Transform(enrichID, func(_ context.Context, d TestData) TestData {
+				d.Value = "enriched-" + d.Value
+				return d
+			}),
+		)
+
+		// Add channel
+		channel := make(chan TestData, 10)
+		factory.AddChannel("output-channel", channel)
+
+		// Build pipeline that ends with stream
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type: "sequence",
+				Children: []flume.Node{
+					{Ref: "validate"},
+					{Ref: "enrich"},
+					{Stream: "output-channel"},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		// Process data
+		ctx := context.Background()
+		input := TestData{Value: "test"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Pipeline should return the enriched result
+		if result.Value != "enriched-test" {
+			t.Errorf("expected 'enriched-test', got '%s'", result.Value)
+		}
+
+		// Check channel output
+		select {
+		case received := <-channel:
+			if received.Value != "enriched-test" {
+				t.Errorf("expected 'enriched-test', got '%s'", received.Value)
+			}
+		default:
+			t.Error("channel didn't receive expected data")
+		}
+	})
+
+	t.Run("switch routing to different channels", func(t *testing.T) {
+		factory := flume.New[TestData]()
+
+		// Define identities
+		routeByValueID := factory.Identity("route-by-value", "Routes data by value to priority queues")
+
+		// Add condition
+		factory.AddCondition(flume.Condition[TestData]{
+			Identity: routeByValueID,
+			Condition: func(_ context.Context, d TestData) string {
+				if d.Value == "high" {
+					return "high-priority"
+				}
+				return "low-priority"
+			},
+		})
+
+		// Add channels
+		highChannel := make(chan TestData, 10)
+		lowChannel := make(chan TestData, 10)
+		factory.AddChannel("high-channel", highChannel)
+		factory.AddChannel("low-channel", lowChannel)
+
+		// Build switch that routes to different channels
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type:      "switch",
+				Condition: "route-by-value",
+				Routes: map[string]flume.Node{
+					"high-priority": {Stream: "high-channel"},
+					"low-priority":  {Stream: "low-channel"},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		// Process different values
+		ctx := context.Background()
+
+		// Send high priority
+		highData := TestData{Value: "high"}
+		_, err = pipeline.Process(ctx, highData)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Send low priority
+		lowData := TestData{Value: "low"}
+		_, err = pipeline.Process(ctx, lowData)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Verify routing
+		select {
+		case received := <-highChannel:
+			if received.Value != "high" {
+				t.Errorf("high channel: expected 'high', got '%s'", received.Value)
+			}
+		default:
+			t.Error("high channel didn't receive expected data")
+		}
+
+		select {
+		case received := <-lowChannel:
+			if received.Value != "low" {
+				t.Errorf("low channel: expected 'low', got '%s'", received.Value)
+			}
+		default:
+			t.Error("low channel didn't receive expected data")
+		}
+	})
+}
+
 func TestBuildErrorPaths(t *testing.T) {
 	factory := flume.New[TestData]()
 
+	// Define identities upfront - note: these use the same "exists" name for processor/predicate/condition
+	// to test error paths when components exist
+	existsProcessorID := factory.Identity("exists", "Processor for error path tests")
+	// Note: predicates and conditions can share names with processors as they are in separate registries
+	existsPredicateID := pipz.NewIdentity("exists", "Predicate for error path tests")
+	existsConditionID := pipz.NewIdentity("exists", "Condition for error path tests")
+
 	// Register minimal components for testing
 	factory.Add(
-		pipz.Transform("exists", func(_ context.Context, d TestData) TestData {
+		pipz.Transform(existsProcessorID, func(_ context.Context, d TestData) TestData {
 			return d
 		}),
 	)
 	factory.AddPredicate(flume.Predicate[TestData]{
-		Name:      "exists",
+		Identity:  existsPredicateID,
 		Predicate: func(_ context.Context, _ TestData) bool { return true },
 	})
 	factory.AddCondition(flume.Condition[TestData]{
-		Name:      "exists",
+		Identity:  existsConditionID,
 		Condition: func(_ context.Context, _ TestData) string { return "a" },
 	})
 
 	tests := []struct {
 		name         string
-		schema       flume.Schema
 		expectedPath string
+		schema       flume.Schema
 	}{
 		{
 			name: "missing processor at root",

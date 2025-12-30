@@ -17,8 +17,8 @@ func BenchmarkBuilderBasic(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 50; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -101,15 +101,15 @@ func BenchmarkBuilderConnectors(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 20; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
 
 	// Register predicate
 	factory.AddPredicate(flume.Predicate[flumetesting.TestData]{
-		Name: "is-valid",
+		Identity: factory.Identity("is-valid", "Validates data ID is positive"),
 		Predicate: func(_ context.Context, d flumetesting.TestData) bool {
 			return d.ID > 0
 		},
@@ -117,7 +117,7 @@ func BenchmarkBuilderConnectors(b *testing.B) {
 
 	// Register condition
 	factory.AddCondition(flume.Condition[flumetesting.TestData]{
-		Name: "get-status",
+		Identity: factory.Identity("get-status", "Returns high/low based on value"),
 		Condition: func(_ context.Context, d flumetesting.TestData) string {
 			if d.Value > 100 {
 				return "high"
@@ -278,14 +278,14 @@ func BenchmarkBuilderNested(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 30; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
 
 	factory.AddPredicate(flume.Predicate[flumetesting.TestData]{
-		Name: "pred",
+		Identity: factory.Identity("pred", "Always-true benchmark predicate"),
 		Predicate: func(_ context.Context, _ flumetesting.TestData) bool {
 			return true
 		},
@@ -434,8 +434,8 @@ func BenchmarkBuilderWithChannels(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 10; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -520,23 +520,28 @@ func BenchmarkPipelineExecution(b *testing.B) {
 	factory := flume.New[flumetesting.TestData]()
 
 	// Register lightweight processors
+	incrementID := factory.Identity("increment", "Increments ID by 1")
+	doubleID := factory.Identity("double", "Doubles the value")
+	formatID := factory.Identity("format", "Formats name based on ID")
+	nonZeroID := factory.Identity("non-zero", "Validates ID is positive")
+
 	factory.Add(
-		pipz.Transform("increment", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(incrementID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.ID++
 			return d
 		}),
-		pipz.Transform("double", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(doubleID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Value *= 2
 			return d
 		}),
-		pipz.Transform("format", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		pipz.Transform(formatID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			d.Name = fmt.Sprintf("item-%d", d.ID)
 			return d
 		}),
 	)
 
 	factory.AddPredicate(flume.Predicate[flumetesting.TestData]{
-		Name: "non-zero",
+		Identity: nonZeroID,
 		Predicate: func(_ context.Context, d flumetesting.TestData) bool {
 			return d.ID > 0
 		},
@@ -649,8 +654,8 @@ func BenchmarkConcurrentBuilds(b *testing.B) {
 
 	// Register processors
 	for i := 0; i < 20; i++ {
-		name := pipz.Name(fmt.Sprintf("processor-%d", i))
-		factory.Add(pipz.Transform(name, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+		id := factory.Identity(fmt.Sprintf("processor-%d", i), fmt.Sprintf("Benchmark processor %d", i))
+		factory.Add(pipz.Transform(id, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 			return d
 		}))
 	}
@@ -681,7 +686,8 @@ func BenchmarkConcurrentBuilds(b *testing.B) {
 func BenchmarkBuildAndExecute(b *testing.B) {
 	factory := flume.New[flumetesting.TestData]()
 
-	factory.Add(pipz.Transform("process", func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
+	processID := factory.Identity("process", "Increments ID by 1")
+	factory.Add(pipz.Transform(processID, func(_ context.Context, d flumetesting.TestData) flumetesting.TestData {
 		d.ID++
 		return d
 	}))

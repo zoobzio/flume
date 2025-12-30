@@ -132,20 +132,20 @@ func TestSignalUniqueness(t *testing.T) {
 func TestFieldKeys(t *testing.T) {
 	// Test that all field keys are defined
 	keys := []struct {
-		name string
 		key  capitan.Key
+		name string
 	}{
-		{"KeyName", flume.KeyName},
-		{"KeyType", flume.KeyType},
-		{"KeyVersion", flume.KeyVersion},
-		{"KeyOldVersion", flume.KeyOldVersion},
-		{"KeyNewVersion", flume.KeyNewVersion},
-		{"KeyPath", flume.KeyPath},
-		{"KeyError", flume.KeyError},
-		{"KeyDuration", flume.KeyDuration},
-		{"KeyErrorCount", flume.KeyErrorCount},
-		{"KeySizeBytes", flume.KeySizeBytes},
-		{"KeyFound", flume.KeyFound},
+		{key: flume.KeyName, name: "KeyName"},
+		{key: flume.KeyType, name: "KeyType"},
+		{key: flume.KeyVersion, name: "KeyVersion"},
+		{key: flume.KeyOldVersion, name: "KeyOldVersion"},
+		{key: flume.KeyNewVersion, name: "KeyNewVersion"},
+		{key: flume.KeyPath, name: "KeyPath"},
+		{key: flume.KeyError, name: "KeyError"},
+		{key: flume.KeyDuration, name: "KeyDuration"},
+		{key: flume.KeyErrorCount, name: "KeyErrorCount"},
+		{key: flume.KeySizeBytes, name: "KeySizeBytes"},
+		{key: flume.KeyFound, name: "KeyFound"},
 	}
 
 	for _, tt := range keys {

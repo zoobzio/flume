@@ -42,20 +42,23 @@ func TestSpec_Empty(t *testing.T) {
 func TestSpec_Processors(t *testing.T) {
 	factory := flume.New[testData]()
 
+	// Define identities upfront
+	processorAID := factory.Identity("processor-a", "Basic processor A")
+	processorBID := factory.Identity("processor-b", "Processes B data")
+
 	// Add without metadata
 	factory.Add(
-		pipz.Apply[testData]("processor-a", func(_ context.Context, d testData) (testData, error) {
+		pipz.Apply(processorAID, func(_ context.Context, d testData) (testData, error) {
 			return d, nil
 		}),
 	)
 
 	// Add with metadata
 	factory.AddWithMeta(flume.ProcessorMeta[testData]{
-		Processor: pipz.Apply[testData]("processor-b", func(_ context.Context, d testData) (testData, error) {
+		Processor: pipz.Apply(processorBID, func(_ context.Context, d testData) (testData, error) {
 			return d, nil
 		}),
-		Description: "Processes B data",
-		Tags:        []string{"processing", "test"},
+		Tags: []string{"processing", "test"},
 	})
 
 	spec := factory.Spec()
@@ -68,8 +71,8 @@ func TestSpec_Processors(t *testing.T) {
 	if spec.Processors[0].Name != "processor-a" {
 		t.Errorf("expected first processor to be 'processor-a', got %s", spec.Processors[0].Name)
 	}
-	if spec.Processors[0].Description != "" {
-		t.Errorf("expected empty description for processor-a, got %s", spec.Processors[0].Description)
+	if spec.Processors[0].Description != "Basic processor A" {
+		t.Errorf("expected description 'Basic processor A' for processor-a, got %s", spec.Processors[0].Description)
 	}
 
 	if spec.Processors[1].Name != "processor-b" {
@@ -86,16 +89,18 @@ func TestSpec_Processors(t *testing.T) {
 func TestSpec_Predicates(t *testing.T) {
 	factory := flume.New[testData]()
 
+	// Define identities upfront
+	isValidID := factory.Identity("is-valid", "Checks if data is valid")
+	isActiveID := factory.Identity("is-active", "Checks if data is active")
+
 	factory.AddPredicate(
 		flume.Predicate[testData]{
-			Name:        "is-valid",
-			Description: "Checks if data is valid",
-			Predicate:   func(_ context.Context, _ testData) bool { return true },
+			Identity:  isValidID,
+			Predicate: func(_ context.Context, _ testData) bool { return true },
 		},
 		flume.Predicate[testData]{
-			Name:        "is-active",
-			Description: "Checks if data is active",
-			Predicate:   func(_ context.Context, _ testData) bool { return true },
+			Identity:  isActiveID,
+			Predicate: func(_ context.Context, _ testData) bool { return true },
 		},
 	)
 
@@ -121,12 +126,14 @@ func TestSpec_Predicates(t *testing.T) {
 func TestSpec_Conditions(t *testing.T) {
 	factory := flume.New[testData]()
 
+	// Define identities upfront
+	routeTypeID := factory.Identity("route-type", "Determines routing based on type")
+
 	factory.AddCondition(
 		flume.Condition[testData]{
-			Name:        "route-type",
-			Description: "Determines routing based on type",
-			Values:      []string{"typeA", "typeB", "typeC"},
-			Condition:   func(_ context.Context, _ testData) string { return "typeA" },
+			Identity:  routeTypeID,
+			Values:    []string{"typeA", "typeB", "typeC"},
+			Condition: func(_ context.Context, _ testData) string { return "typeA" },
 		},
 	)
 
@@ -249,11 +256,16 @@ func TestSpec_Connectors(t *testing.T) {
 func TestSpec_Deterministic(t *testing.T) {
 	factory := flume.New[testData]()
 
+	// Define identities upfront
+	zProcessorID := factory.Identity("z-processor", "Processor Z for ordering test")
+	aProcessorID := factory.Identity("a-processor", "Processor A for ordering test")
+	mProcessorID := factory.Identity("m-processor", "Processor M for ordering test")
+
 	// Add items in random order
 	factory.Add(
-		pipz.Apply[testData]("z-processor", func(_ context.Context, d testData) (testData, error) { return d, nil }),
-		pipz.Apply[testData]("a-processor", func(_ context.Context, d testData) (testData, error) { return d, nil }),
-		pipz.Apply[testData]("m-processor", func(_ context.Context, d testData) (testData, error) { return d, nil }),
+		pipz.Apply(zProcessorID, func(_ context.Context, d testData) (testData, error) { return d, nil }),
+		pipz.Apply(aProcessorID, func(_ context.Context, d testData) (testData, error) { return d, nil }),
+		pipz.Apply(mProcessorID, func(_ context.Context, d testData) (testData, error) { return d, nil }),
 	)
 
 	// Call Spec multiple times and verify order is consistent
@@ -275,19 +287,21 @@ func TestSpec_Deterministic(t *testing.T) {
 func TestSpecJSON(t *testing.T) {
 	factory := flume.New[testData]()
 
+	// Define identities upfront
+	jsonProcessorID := factory.Identity("json-processor", "Processor for JSON test")
+	jsonPredicateID := factory.Identity("json-predicate", "Predicate for JSON test")
+
 	// Add some components
 	factory.AddWithMeta(flume.ProcessorMeta[testData]{
-		Processor: pipz.Apply[testData]("json-processor", func(_ context.Context, d testData) (testData, error) {
+		Processor: pipz.Apply(jsonProcessorID, func(_ context.Context, d testData) (testData, error) {
 			return d, nil
 		}),
-		Description: "Processor for JSON test",
-		Tags:        []string{"json", "test"},
+		Tags: []string{"json", "test"},
 	})
 
 	factory.AddPredicate(flume.Predicate[testData]{
-		Name:        "json-predicate",
-		Description: "Predicate for JSON test",
-		Predicate:   func(_ context.Context, _ testData) bool { return true },
+		Identity:  jsonPredicateID,
+		Predicate: func(_ context.Context, _ testData) bool { return true },
 	})
 
 	jsonStr, err := factory.SpecJSON()
@@ -325,15 +339,17 @@ func TestSpecJSON(t *testing.T) {
 func TestAddWithMeta(t *testing.T) {
 	factory := flume.New[testData]()
 
-	processor := pipz.Apply[testData]("test-processor", func(_ context.Context, d testData) (testData, error) {
+	// Define identities upfront
+	testProcessorID := factory.Identity("test-processor", "Test processor that sets value")
+
+	processor := pipz.Apply(testProcessorID, func(_ context.Context, d testData) (testData, error) {
 		d.Value = "processed"
 		return d, nil
 	})
 
 	factory.AddWithMeta(flume.ProcessorMeta[testData]{
-		Processor:   processor,
-		Description: "Test processor that sets value",
-		Tags:        []string{"test", "example"},
+		Processor: processor,
+		Tags:      []string{"test", "example"},
 	})
 
 	// Verify it's registered
