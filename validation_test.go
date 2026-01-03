@@ -652,8 +652,12 @@ func TestSchemaVersion(t *testing.T) {
 		},
 	}
 
-	// Bind initial schema
-	binding, err := factory.Bind(testID, schemaV1)
+	// Register and bind initial schema
+	if err := factory.SetSchema("versioned-schema", schemaV1); err != nil {
+		t.Fatalf("Failed to set schema v1: %v", err)
+	}
+
+	binding, err := factory.Bind(testID, "versioned-schema", flume.WithAutoSync[TestData]())
 	if err != nil {
 		t.Fatalf("Failed to bind schema v1: %v", err)
 	}
@@ -665,7 +669,7 @@ func TestSchemaVersion(t *testing.T) {
 		t.Fatalf("Failed to process with v1: %v", pErr)
 	}
 
-	// Update to version 2
+	// Update to version 2 via SetSchema (auto-sync)
 	schemaV2 := flume.Schema{
 		Version: "2.0.0",
 		Node: flume.Node{
@@ -673,7 +677,7 @@ func TestSchemaVersion(t *testing.T) {
 		},
 	}
 
-	err = binding.Update(schemaV2)
+	err = factory.SetSchema("versioned-schema", schemaV2)
 	if err != nil {
 		t.Fatalf("Failed to update schema to v2: %v", err)
 	}
@@ -718,8 +722,12 @@ ref: "proc1"`
 		},
 	}
 
+	if err := factory.SetSchema("no-version-schema", schemaNoVersion); err != nil {
+		t.Fatalf("Failed to set schema without version: %v", err)
+	}
+
 	noVersionID := factory.Identity("no-version", "Binding without version")
-	binding2, err := factory.Bind(noVersionID, schemaNoVersion)
+	binding2, err := factory.Bind(noVersionID, "no-version-schema")
 	if err != nil {
 		t.Fatalf("Failed to bind schema without version: %v", err)
 	}

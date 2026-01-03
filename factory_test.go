@@ -442,7 +442,7 @@ func TestFactoryDynamicSchema(t *testing.T) {
 		return d
 	}))
 
-	// Register initial schema via Bind
+	// Register initial schema
 	schema1 := flume.Schema{
 		Node: flume.Node{
 			Type: "sequence",
@@ -452,8 +452,12 @@ func TestFactoryDynamicSchema(t *testing.T) {
 		},
 	}
 
+	if err := factory.SetSchema("dynamic-schema", schema1); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
+
 	id := dynamicID
-	binding, err := factory.Bind(id, schema1)
+	binding, err := factory.Bind(id, "dynamic-schema", flume.WithAutoSync[TestData]())
 	if err != nil {
 		t.Fatalf("Failed to bind schema: %v", err)
 	}
@@ -468,7 +472,7 @@ func TestFactoryDynamicSchema(t *testing.T) {
 		t.Errorf("Expected 'test_1', got '%s'", result.Value)
 	}
 
-	// Update schema via Update
+	// Update schema via SetSchema (triggers auto-sync)
 	schema2 := flume.Schema{
 		Node: flume.Node{
 			Type: "sequence",
@@ -479,7 +483,7 @@ func TestFactoryDynamicSchema(t *testing.T) {
 		},
 	}
 
-	err = binding.Update(schema2)
+	err = factory.SetSchema("dynamic-schema", schema2)
 	if err != nil {
 		t.Fatalf("Failed to update schema: %v", err)
 	}
@@ -720,7 +724,7 @@ func TestSchemaManagement(t *testing.T) {
 
 	// Define identities
 	testID := factory.Identity("test", "Test processor for schema management")
-	schema1ID := factory.Identity("schema1", "First schema binding")
+	bindingID := factory.Identity("schema1", "First schema binding")
 	nonExistentID := factory.Identity("non-existent", "Non-existent binding for testing")
 
 	// Add a processor for our schemas
@@ -729,11 +733,16 @@ func TestSchemaManagement(t *testing.T) {
 		return d
 	}))
 
-	// Test Bind (first time - should register)
+	// Register schema first
 	schema1 := flume.Schema{
 		Node: flume.Node{Ref: "test"},
 	}
-	binding, err := factory.Bind(schema1ID, schema1)
+	if err := factory.SetSchema("test-schema", schema1); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
+
+	// Test Bind
+	binding, err := factory.Bind(bindingID, "test-schema", flume.WithAutoSync[TestData]())
 	if err != nil {
 		t.Fatalf("Failed to bind schema: %v", err)
 	}
@@ -742,9 +751,9 @@ func TestSchemaManagement(t *testing.T) {
 	}
 
 	// Test Get retrieves the same binding
-	retrieved := factory.Get(schema1ID)
+	retrieved := factory.Get(bindingID)
 	if retrieved == nil {
-		t.Error("Expected to find schema1")
+		t.Error("Expected to find binding")
 	}
 	if retrieved != binding {
 		t.Error("Get should return the same binding instance")
@@ -756,19 +765,7 @@ func TestSchemaManagement(t *testing.T) {
 		t.Error("Expected Get to return nil for non-existent binding")
 	}
 
-	// Test Update (update existing binding)
-	schema2 := flume.Schema{
-		Node: flume.Node{
-			Type:     "sequence",
-			Children: []flume.Node{{Ref: "test"}},
-		},
-	}
-	err = binding.Update(schema2)
-	if err != nil {
-		t.Fatalf("Failed to update binding: %v", err)
-	}
-
-	// Verify update worked via process
+	// Verify process works
 	ctx := context.Background()
 	result, pErr := binding.Process(ctx, TestData{Value: "input"})
 	if pErr != nil {
@@ -778,19 +775,30 @@ func TestSchemaManagement(t *testing.T) {
 		t.Errorf("Expected 'processed', got '%s'", result.Value)
 	}
 
-	// Test Rollback
-	err = binding.Rollback()
-	if err != nil {
-		t.Fatalf("Rollback failed: %v", err)
+	// Test schema registry functions
+	if !factory.HasSchema("test-schema") {
+		t.Error("Expected HasSchema to return true")
 	}
 
-	// Process again to verify rollback worked
-	result, pErr = binding.Process(ctx, TestData{Value: "input"})
-	if pErr != nil {
-		t.Fatalf("Process after rollback failed: %v", pErr)
+	schemas := factory.ListSchemas()
+	found := false
+	for _, s := range schemas {
+		if s == "test-schema" {
+			found = true
+			break
+		}
 	}
-	if result.Value != "processed" {
-		t.Errorf("Expected 'processed' after rollback, got '%s'", result.Value)
+	if !found {
+		t.Error("Expected 'test-schema' in ListSchemas")
+	}
+
+	// Test GetSchema
+	retrievedSchema, ok := factory.GetSchema("test-schema")
+	if !ok {
+		t.Error("Expected GetSchema to find schema")
+	}
+	if retrievedSchema.Ref != "test" {
+		t.Errorf("Expected schema ref 'test', got '%s'", retrievedSchema.Ref)
 	}
 }
 

@@ -117,11 +117,13 @@ Update pipelines at runtime without restarts:
 // Register a named schema
 factory.SetSchema("order-pipeline", schema)
 
-// Use it - always gets current version
-pipeline, _ := factory.Pipeline("order-pipeline")
-result, _ := pipeline.Process(ctx, order)
+// Create a binding with auto-sync enabled
+binding, _ := factory.Bind(pipelineID, "order-pipeline", flume.WithAutoSync())
 
-// Update atomically - in-flight requests unaffected
+// Process requests (lock-free)
+result, _ := binding.Process(ctx, order)
+
+// Update schema - all auto-sync bindings rebuild automatically
 factory.SetSchema("order-pipeline", newSchema)
 ```
 

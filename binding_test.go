@@ -2,7 +2,6 @@ package flume_test
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
@@ -33,14 +32,18 @@ func TestBindingBasic(t *testing.T) {
 		return d
 	}))
 
-	// Create binding
-	bindingID := factory.Identity("test-binding", "Test binding")
+	// Register schema
 	schema := flume.Schema{
 		Version: "1.0",
 		Node:    flume.Node{Ref: "process"},
 	}
+	if err := factory.SetSchema("test-schema", schema); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
 
-	binding, err := factory.Bind(bindingID, schema)
+	// Create binding
+	bindingID := factory.Identity("test-binding", "Test binding")
+	binding, err := factory.Bind(bindingID, "test-schema")
 	if err != nil {
 		t.Fatalf("Failed to create binding: %v", err)
 	}
@@ -64,29 +67,19 @@ func TestBindingAccessors(t *testing.T) {
 		return d
 	}))
 
-	bindingID := factory.Identity("accessor-test", "Test binding for accessors")
 	schema := flume.Schema{
 		Version: "2.5",
 		Node:    flume.Node{Ref: "noop"},
 	}
+	if err := factory.SetSchema("accessor-schema", schema); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
 
-	binding, err := factory.Bind(bindingID, schema)
+	bindingID := factory.Identity("accessor-test", "Test binding for accessors")
+	binding, err := factory.Bind(bindingID, "accessor-schema")
 	if err != nil {
 		t.Fatalf("Failed to create binding: %v", err)
 	}
-
-	t.Run("Version", func(t *testing.T) {
-		if v := binding.Version(); v != "2.5" {
-			t.Errorf("Expected version '2.5', got '%s'", v)
-		}
-	})
-
-	t.Run("Schema", func(t *testing.T) {
-		s := binding.Schema()
-		if s.Version != "2.5" {
-			t.Errorf("Expected schema version '2.5', got '%s'", s.Version)
-		}
-	})
 
 	t.Run("Identity", func(t *testing.T) {
 		id := binding.Identity()
@@ -95,16 +88,15 @@ func TestBindingAccessors(t *testing.T) {
 		}
 	})
 
-	t.Run("HistoryCap", func(t *testing.T) {
-		if hCap := binding.HistoryCap(); hCap != flume.DefaultHistoryCap {
-			t.Errorf("Expected history cap %d, got %d", flume.DefaultHistoryCap, hCap)
+	t.Run("SchemaID", func(t *testing.T) {
+		if schemaID := binding.SchemaID(); schemaID != "accessor-schema" {
+			t.Errorf("Expected schema ID 'accessor-schema', got '%s'", schemaID)
 		}
 	})
 
-	t.Run("History_empty_initially", func(t *testing.T) {
-		history := binding.History()
-		if len(history) != 0 {
-			t.Errorf("Expected empty history, got %d entries", len(history))
+	t.Run("AutoSync", func(t *testing.T) {
+		if binding.AutoSync() {
+			t.Error("Expected AutoSync to be false by default")
 		}
 	})
 
@@ -116,7 +108,7 @@ func TestBindingAccessors(t *testing.T) {
 	})
 }
 
-func TestBindingUpdate(t *testing.T) {
+func TestBindingAutoSync(t *testing.T) {
 	factory := flume.New[bindingTestData]()
 
 	proc1ID := factory.Identity("proc1", "Processor 1")
@@ -131,15 +123,22 @@ func TestBindingUpdate(t *testing.T) {
 		return d
 	}))
 
-	bindingID := factory.Identity("update-test", "Test binding for updates")
 	schema1 := flume.Schema{
 		Version: "1",
 		Node:    flume.Node{Ref: "proc1"},
 	}
+	if err := factory.SetSchema("auto-sync-schema", schema1); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
 
-	binding, err := factory.Bind(bindingID, schema1)
+	bindingID := factory.Identity("auto-sync-test", "Test binding for auto-sync")
+	binding, err := factory.Bind(bindingID, "auto-sync-schema", flume.WithAutoSync[bindingTestData]())
 	if err != nil {
 		t.Fatalf("Failed to create binding: %v", err)
+	}
+
+	if !binding.AutoSync() {
+		t.Error("Expected AutoSync to be true")
 	}
 
 	t.Run("initial_version", func(t *testing.T) {
@@ -152,18 +151,13 @@ func TestBindingUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("update_with_explicit_version", func(t *testing.T) {
+	t.Run("auto_sync_on_schema_update", func(t *testing.T) {
 		schema2 := flume.Schema{
 			Version: "2",
 			Node:    flume.Node{Ref: "proc2"},
 		}
-
-		if err := binding.Update(schema2); err != nil {
-			t.Fatalf("Update failed: %v", err)
-		}
-
-		if v := binding.Version(); v != "2" {
-			t.Errorf("Expected version '2', got '%s'", v)
+		if err := factory.SetSchema("auto-sync-schema", schema2); err != nil {
+			t.Fatalf("Failed to update schema: %v", err)
 		}
 
 		result, err := binding.Process(context.Background(), bindingTestData{})
@@ -171,101 +165,16 @@ func TestBindingUpdate(t *testing.T) {
 			t.Fatalf("Process failed: %v", err)
 		}
 		if result.Value != "v2" {
-			t.Errorf("Expected 'v2', got '%s'", result.Value)
-		}
-
-		// Check history
-		history := binding.History()
-		if len(history) != 1 {
-			t.Errorf("Expected 1 history entry, got %d", len(history))
-		}
-		if history[0].Version != "1" {
-			t.Errorf("Expected history version '1', got '%s'", history[0].Version)
-		}
-	})
-
-	t.Run("update_with_auto_version_numeric", func(t *testing.T) {
-		schema3 := flume.Schema{
-			Node: flume.Node{Ref: "proc1"},
-		}
-
-		if err := binding.Update(schema3); err != nil {
-			t.Fatalf("Update failed: %v", err)
-		}
-
-		// Should auto-increment from "2" to "3"
-		if v := binding.Version(); v != "3" {
-			t.Errorf("Expected auto-incremented version '3', got '%s'", v)
-		}
-	})
-
-	t.Run("update_with_auto_version_non_numeric", func(t *testing.T) {
-		// First set a non-numeric version
-		schemaAlpha := flume.Schema{
-			Version: "alpha",
-			Node:    flume.Node{Ref: "proc2"},
-		}
-		if err := binding.Update(schemaAlpha); err != nil {
-			t.Fatalf("Update failed: %v", err)
-		}
-
-		// Now update without version - should append ".1"
-		schemaNext := flume.Schema{
-			Node: flume.Node{Ref: "proc1"},
-		}
-		if err := binding.Update(schemaNext); err != nil {
-			t.Fatalf("Update failed: %v", err)
-		}
-
-		if v := binding.Version(); v != "alpha.1" {
-			t.Errorf("Expected version 'alpha.1', got '%s'", v)
+			t.Errorf("Expected 'v2' after auto-sync, got '%s'", result.Value)
 		}
 	})
 }
 
-func TestBindingUpdateError(t *testing.T) {
+func TestBindingNoAutoSync(t *testing.T) {
 	factory := flume.New[bindingTestData]()
 
-	procID := factory.Identity("valid", "Valid processor")
-	factory.Add(pipz.Transform(procID, func(_ context.Context, d bindingTestData) bindingTestData {
-		return d
-	}))
-
-	bindingID := factory.Identity("error-test", "Test binding for errors")
-	schema := flume.Schema{
-		Node: flume.Node{Ref: "valid"},
-	}
-
-	binding, err := factory.Bind(bindingID, schema)
-	if err != nil {
-		t.Fatalf("Failed to create binding: %v", err)
-	}
-
-	// Try to update with invalid schema (references non-existent processor)
-	invalidSchema := flume.Schema{
-		Node: flume.Node{Ref: "nonexistent"},
-	}
-
-	err = binding.Update(invalidSchema)
-	if err == nil {
-		t.Error("Expected error for invalid schema, got nil")
-	}
-
-	// Verify binding still works with original schema
-	result, err := binding.Process(context.Background(), bindingTestData{Value: "test"})
-	if err != nil {
-		t.Fatalf("Process failed after invalid update: %v", err)
-	}
-	if result.Value != "test" {
-		t.Errorf("Expected 'test', got '%s'", result.Value)
-	}
-}
-
-func TestBindingRollback(t *testing.T) {
-	factory := flume.New[bindingTestData]()
-
-	proc1ID := factory.Identity("v1-proc", "Version 1 processor")
-	proc2ID := factory.Identity("v2-proc", "Version 2 processor")
+	proc1ID := factory.Identity("proc1", "Processor 1")
+	proc2ID := factory.Identity("proc2", "Processor 2")
 
 	factory.Add(pipz.Transform(proc1ID, func(_ context.Context, d bindingTestData) bindingTestData {
 		d.Value = "v1"
@@ -276,215 +185,47 @@ func TestBindingRollback(t *testing.T) {
 		return d
 	}))
 
-	bindingID := factory.Identity("rollback-test", "Test binding for rollback")
 	schema1 := flume.Schema{
 		Version: "1",
-		Node:    flume.Node{Ref: "v1-proc"},
+		Node:    flume.Node{Ref: "proc1"},
+	}
+	if err := factory.SetSchema("no-sync-schema", schema1); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
 	}
 
-	binding, err := factory.Bind(bindingID, schema1)
+	bindingID := factory.Identity("no-sync-test", "Test binding without auto-sync")
+	binding, err := factory.Bind(bindingID, "no-sync-schema") // No WithAutoSync
 	if err != nil {
 		t.Fatalf("Failed to create binding: %v", err)
 	}
 
-	t.Run("rollback_with_no_history", func(t *testing.T) {
-		err := binding.Rollback()
-		if !errors.Is(err, flume.ErrNoHistory) {
-			t.Errorf("Expected ErrNoHistory, got %v", err)
-		}
-	})
-
-	// Update to v2
+	// Update schema
 	schema2 := flume.Schema{
 		Version: "2",
-		Node:    flume.Node{Ref: "v2-proc"},
+		Node:    flume.Node{Ref: "proc2"},
 	}
-	if err := binding.Update(schema2); err != nil {
-		t.Fatalf("Update failed: %v", err)
+	if err := factory.SetSchema("no-sync-schema", schema2); err != nil {
+		t.Fatalf("Failed to update schema: %v", err)
 	}
 
-	t.Run("rollback_to_previous", func(t *testing.T) {
-		if v := binding.Version(); v != "2" {
-			t.Errorf("Expected version '2' before rollback, got '%s'", v)
-		}
-
-		err := binding.Rollback()
-		if err != nil {
-			t.Fatalf("Rollback failed: %v", err)
-		}
-
-		if v := binding.Version(); v != "1" {
-			t.Errorf("Expected version '1' after rollback, got '%s'", v)
-		}
-
-		result, err := binding.Process(context.Background(), bindingTestData{})
-		if err != nil {
-			t.Fatalf("Process failed: %v", err)
-		}
-		if result.Value != "v1" {
-			t.Errorf("Expected 'v1' after rollback, got '%s'", result.Value)
-		}
-
-		// History should now be empty
-		if len(binding.History()) != 0 {
-			t.Errorf("Expected empty history after rollback, got %d", len(binding.History()))
-		}
-	})
+	// Binding should still use original schema
+	result, err := binding.Process(context.Background(), bindingTestData{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+	if result.Value != "v1" {
+		t.Errorf("Expected 'v1' (no auto-sync), got '%s'", result.Value)
+	}
 }
 
-func TestBindingRollbackTo(t *testing.T) {
+func TestBindingSchemaNotFound(t *testing.T) {
 	factory := flume.New[bindingTestData]()
 
-	for _, v := range []string{"v1", "v2", "v3", "v4"} {
-		id := factory.Identity(v+"-proc", "Processor for "+v)
-		val := v
-		factory.Add(pipz.Transform(id, func(_ context.Context, d bindingTestData) bindingTestData {
-			d.Value = val
-			return d
-		}))
+	bindingID := factory.Identity("missing-schema-test", "Test binding for missing schema")
+	_, err := factory.Bind(bindingID, "nonexistent-schema")
+	if err == nil {
+		t.Error("Expected error for nonexistent schema, got nil")
 	}
-
-	bindingID := factory.Identity("rollback-to-test", "Test binding for rollback-to")
-	schema := flume.Schema{
-		Version: "v1",
-		Node:    flume.Node{Ref: "v1-proc"},
-	}
-
-	binding, err := factory.Bind(bindingID, schema)
-	if err != nil {
-		t.Fatalf("Failed to create binding: %v", err)
-	}
-
-	// Create versions v2, v3, v4
-	for _, v := range []string{"v2", "v3", "v4"} {
-		s := flume.Schema{
-			Version: v,
-			Node:    flume.Node{Ref: v + "-proc"},
-		}
-		if err := binding.Update(s); err != nil {
-			t.Fatalf("Update to %s failed: %v", v, err)
-		}
-	}
-
-	t.Run("rollback_to_specific_version", func(t *testing.T) {
-		// Current is v4, history is [v1, v2, v3]
-		if v := binding.Version(); v != "v4" {
-			t.Errorf("Expected version 'v4', got '%s'", v)
-		}
-
-		err := binding.RollbackTo("v2")
-		if err != nil {
-			t.Fatalf("RollbackTo failed: %v", err)
-		}
-
-		if v := binding.Version(); v != "v2" {
-			t.Errorf("Expected version 'v2' after rollback, got '%s'", v)
-		}
-
-		// History should be [v1] (v2, v3 are discarded, v4 was current)
-		history := binding.History()
-		if len(history) != 1 {
-			t.Errorf("Expected 1 history entry, got %d", len(history))
-		}
-		if history[0].Version != "v1" {
-			t.Errorf("Expected history[0] to be 'v1', got '%s'", history[0].Version)
-		}
-
-		result, err := binding.Process(context.Background(), bindingTestData{})
-		if err != nil {
-			t.Fatalf("Process failed: %v", err)
-		}
-		if result.Value != "v2" {
-			t.Errorf("Expected 'v2', got '%s'", result.Value)
-		}
-	})
-
-	t.Run("rollback_to_nonexistent_version", func(t *testing.T) {
-		err := binding.RollbackTo("nonexistent")
-		if !errors.Is(err, flume.ErrVersionNotFound) {
-			t.Errorf("Expected ErrVersionNotFound, got %v", err)
-		}
-	})
-}
-
-func TestBindingHistoryCap(t *testing.T) {
-	factory := flume.New[bindingTestData]()
-
-	procID := factory.Identity("proc", "Test processor")
-	factory.Add(pipz.Transform(procID, func(_ context.Context, d bindingTestData) bindingTestData {
-		return d
-	}))
-
-	bindingID := factory.Identity("history-cap-test", "Test binding for history cap")
-	schema := flume.Schema{
-		Version: "1",
-		Node:    flume.Node{Ref: "proc"},
-	}
-
-	binding, err := factory.Bind(bindingID, schema)
-	if err != nil {
-		t.Fatalf("Failed to create binding: %v", err)
-	}
-
-	t.Run("history_trimmed_on_update", func(t *testing.T) {
-		// Set small history cap
-		binding.SetHistoryCap(3)
-
-		// Create 5 updates (so history would be 5 entries without cap)
-		for i := 2; i <= 6; i++ {
-			s := flume.Schema{
-				Version: string(rune('0' + i)),
-				Node:    flume.Node{Ref: "proc"},
-			}
-			if err := binding.Update(s); err != nil {
-				t.Fatalf("Update failed: %v", err)
-			}
-		}
-
-		// History should be trimmed to 3 entries
-		history := binding.History()
-		if len(history) != 3 {
-			t.Errorf("Expected 3 history entries, got %d", len(history))
-		}
-
-		// Oldest entries should be trimmed (1, 2 removed; 3, 4, 5 remain)
-		if history[0].Version != "3" {
-			t.Errorf("Expected oldest history to be '3', got '%s'", history[0].Version)
-		}
-	})
-
-	t.Run("set_history_cap_trims_existing", func(t *testing.T) {
-		// Currently have 3 entries, set cap to 1
-		binding.SetHistoryCap(1)
-
-		history := binding.History()
-		if len(history) != 1 {
-			t.Errorf("Expected 1 history entry after cap reduction, got %d", len(history))
-		}
-
-		// Should keep the most recent
-		if history[0].Version != "5" {
-			t.Errorf("Expected remaining entry to be '5', got '%s'", history[0].Version)
-		}
-	})
-
-	t.Run("set_history_cap_zero_ignored", func(t *testing.T) {
-		currentCap := binding.HistoryCap()
-		binding.SetHistoryCap(0)
-
-		if hCap := binding.HistoryCap(); hCap != currentCap {
-			t.Errorf("Expected cap unchanged at %d, got %d", currentCap, hCap)
-		}
-	})
-
-	t.Run("set_history_cap_negative_ignored", func(t *testing.T) {
-		currentCap := binding.HistoryCap()
-		binding.SetHistoryCap(-5)
-
-		if hCap := binding.HistoryCap(); hCap != currentCap {
-			t.Errorf("Expected cap unchanged at %d, got %d", currentCap, hCap)
-		}
-	})
 }
 
 func TestBindingIdempotent(t *testing.T) {
@@ -495,18 +236,22 @@ func TestBindingIdempotent(t *testing.T) {
 		return d
 	}))
 
-	bindingID := factory.Identity("idempotent-test", "Test binding for idempotency")
 	schema := flume.Schema{
 		Node: flume.Node{Ref: "proc"},
 	}
+	if err := factory.SetSchema("idempotent-schema", schema); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
 
-	binding1, err := factory.Bind(bindingID, schema)
+	bindingID := factory.Identity("idempotent-test", "Test binding for idempotency")
+
+	binding1, err := factory.Bind(bindingID, "idempotent-schema")
 	if err != nil {
 		t.Fatalf("First Bind failed: %v", err)
 	}
 
 	// Second Bind with same identity should return same binding
-	binding2, err := factory.Bind(bindingID, schema)
+	binding2, err := factory.Bind(bindingID, "idempotent-schema")
 	if err != nil {
 		t.Fatalf("Second Bind failed: %v", err)
 	}
@@ -533,12 +278,15 @@ func TestBindingGet(t *testing.T) {
 	})
 
 	t.Run("get_existing", func(t *testing.T) {
-		bindingID := factory.Identity("existing", "Existing binding")
 		schema := flume.Schema{
 			Node: flume.Node{Ref: "proc"},
 		}
+		if err := factory.SetSchema("get-schema", schema); err != nil {
+			t.Fatalf("Failed to set schema: %v", err)
+		}
 
-		created, err := factory.Bind(bindingID, schema)
+		bindingID := factory.Identity("existing", "Existing binding")
+		created, err := factory.Bind(bindingID, "get-schema")
 		if err != nil {
 			t.Fatalf("Bind failed: %v", err)
 		}
@@ -561,12 +309,15 @@ func TestBindingListBindings(t *testing.T) {
 	schema := flume.Schema{
 		Node: flume.Node{Ref: "proc"},
 	}
+	if err := factory.SetSchema("list-schema", schema); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
 
 	// Create multiple bindings
 	names := []string{"alpha", "beta", "gamma"}
 	for _, name := range names {
 		id := factory.Identity(name, "Binding "+name)
-		if _, err := factory.Bind(id, schema); err != nil {
+		if _, err := factory.Bind(id, "list-schema"); err != nil {
 			t.Fatalf("Bind failed for %s: %v", name, err)
 		}
 	}
@@ -597,12 +348,15 @@ func TestBindingConcurrentAccess(t *testing.T) {
 		return d
 	}))
 
-	bindingID := factory.Identity("concurrent-test", "Test binding for concurrency")
 	schema := flume.Schema{
 		Node: flume.Node{Ref: "proc"},
 	}
+	if err := factory.SetSchema("concurrent-schema", schema); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
 
-	binding, err := factory.Bind(bindingID, schema)
+	bindingID := factory.Identity("concurrent-test", "Test binding for concurrency")
+	binding, err := factory.Bind(bindingID, "concurrent-schema", flume.WithAutoSync[bindingTestData]())
 	if err != nil {
 		t.Fatalf("Bind failed: %v", err)
 	}
@@ -628,14 +382,14 @@ func TestBindingConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = binding.Version()
-			_ = binding.Schema()
-			_ = binding.History()
-			_ = binding.HistoryCap()
+			_ = binding.Identity()
+			_ = binding.SchemaID()
+			_ = binding.AutoSync()
+			_ = binding.Pipeline()
 		}()
 	}
 
-	// Some updates
+	// Some schema updates (triggers auto-sync rebuilds)
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(v int) {
@@ -644,7 +398,7 @@ func TestBindingConcurrentAccess(t *testing.T) {
 				Version: string(rune('A' + v)),
 				Node:    flume.Node{Ref: "proc"},
 			}
-			if err := binding.Update(s); err != nil {
+			if err := factory.SetSchema("concurrent-schema", s); err != nil {
 				errChan <- err
 			}
 		}(i)
@@ -658,7 +412,7 @@ func TestBindingConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestBindingHistoryInfo(t *testing.T) {
+func TestSchemaRegistry(t *testing.T) {
 	factory := flume.New[bindingTestData]()
 
 	procID := factory.Identity("proc", "Test processor")
@@ -666,46 +420,145 @@ func TestBindingHistoryInfo(t *testing.T) {
 		return d
 	}))
 
-	bindingID := factory.Identity("history-info-test", "Test binding for history info")
-	schema := flume.Schema{
-		Version: "initial",
-		Node:    flume.Node{Ref: "proc"},
+	t.Run("SetSchema", func(t *testing.T) {
+		schema := flume.Schema{
+			Version: "1.0",
+			Node:    flume.Node{Ref: "proc"},
+		}
+		if err := factory.SetSchema("test-schema", schema); err != nil {
+			t.Fatalf("SetSchema failed: %v", err)
+		}
+	})
+
+	t.Run("GetSchema", func(t *testing.T) {
+		schema, ok := factory.GetSchema("test-schema")
+		if !ok {
+			t.Fatal("Expected schema to exist")
+		}
+		if schema.Version != "1.0" {
+			t.Errorf("Expected version '1.0', got '%s'", schema.Version)
+		}
+	})
+
+	t.Run("HasSchema", func(t *testing.T) {
+		if !factory.HasSchema("test-schema") {
+			t.Error("Expected HasSchema to return true")
+		}
+		if factory.HasSchema("nonexistent") {
+			t.Error("Expected HasSchema to return false for nonexistent")
+		}
+	})
+
+	t.Run("ListSchemas", func(t *testing.T) {
+		schemas := factory.ListSchemas()
+		found := false
+		for _, id := range schemas {
+			if id == "test-schema" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("Expected 'test-schema' in ListSchemas")
+		}
+	})
+
+	t.Run("RemoveSchema", func(t *testing.T) {
+		if !factory.RemoveSchema("test-schema") {
+			t.Error("Expected RemoveSchema to return true")
+		}
+		if factory.HasSchema("test-schema") {
+			t.Error("Expected schema to be removed")
+		}
+		if factory.RemoveSchema("test-schema") {
+			t.Error("Expected RemoveSchema to return false for already removed")
+		}
+	})
+}
+
+func TestSetSchemaValidation(t *testing.T) {
+	factory := flume.New[bindingTestData]()
+
+	// Try to set invalid schema (references non-existent processor)
+	invalidSchema := flume.Schema{
+		Node: flume.Node{Ref: "nonexistent"},
 	}
 
-	binding, err := factory.Bind(bindingID, schema)
+	err := factory.SetSchema("invalid", invalidSchema)
+	if err == nil {
+		t.Error("Expected error for invalid schema, got nil")
+	}
+}
+
+func TestMultipleBindingsAutoSync(t *testing.T) {
+	factory := flume.New[bindingTestData]()
+
+	proc1ID := factory.Identity("proc1", "Processor 1")
+	proc2ID := factory.Identity("proc2", "Processor 2")
+
+	factory.Add(pipz.Transform(proc1ID, func(_ context.Context, d bindingTestData) bindingTestData {
+		d.Value = "v1"
+		return d
+	}))
+	factory.Add(pipz.Transform(proc2ID, func(_ context.Context, d bindingTestData) bindingTestData {
+		d.Value = "v2"
+		return d
+	}))
+
+	schema1 := flume.Schema{
+		Version: "1",
+		Node:    flume.Node{Ref: "proc1"},
+	}
+	if err := factory.SetSchema("shared-schema", schema1); err != nil {
+		t.Fatalf("Failed to set schema: %v", err)
+	}
+
+	// Create multiple bindings with auto-sync
+	binding1ID := factory.Identity("multi-1", "Multi binding 1")
+	binding2ID := factory.Identity("multi-2", "Multi binding 2")
+
+	binding1, err := factory.Bind(binding1ID, "shared-schema", flume.WithAutoSync[bindingTestData]())
 	if err != nil {
-		t.Fatalf("Bind failed: %v", err)
+		t.Fatalf("Failed to create binding1: %v", err)
 	}
 
-	// Update a few times
-	if err := binding.Update(flume.Schema{Version: "second", Node: flume.Node{Ref: "proc"}}); err != nil {
-		t.Fatalf("Update failed: %v", err)
-	}
-	if err := binding.Update(flume.Schema{Version: "third", Node: flume.Node{Ref: "proc"}}); err != nil {
-		t.Fatalf("Update failed: %v", err)
+	binding2, err := factory.Bind(binding2ID, "shared-schema", flume.WithAutoSync[bindingTestData]())
+	if err != nil {
+		t.Fatalf("Failed to create binding2: %v", err)
 	}
 
-	history := binding.History()
-	if len(history) != 2 {
-		t.Fatalf("Expected 2 history entries, got %d", len(history))
+	// Both should use v1
+	r1, err := binding1.Process(context.Background(), bindingTestData{})
+	if err != nil {
+		t.Fatalf("binding1 process failed: %v", err)
+	}
+	r2, err := binding2.Process(context.Background(), bindingTestData{})
+	if err != nil {
+		t.Fatalf("binding2 process failed: %v", err)
+	}
+	if r1.Value != "v1" || r2.Value != "v1" {
+		t.Errorf("Expected both bindings to use 'v1'")
 	}
 
-	// Check versions are in order (oldest first)
-	if history[0].Version != "initial" {
-		t.Errorf("Expected history[0].Version to be 'initial', got '%s'", history[0].Version)
+	// Update schema
+	schema2 := flume.Schema{
+		Version: "2",
+		Node:    flume.Node{Ref: "proc2"},
 	}
-	if history[1].Version != "second" {
-		t.Errorf("Expected history[1].Version to be 'second', got '%s'", history[1].Version)
+	if err := factory.SetSchema("shared-schema", schema2); err != nil {
+		t.Fatalf("Failed to update schema: %v", err)
 	}
 
-	// Check BuiltAt times are set and in order
-	if history[0].BuiltAt.IsZero() {
-		t.Error("Expected history[0].BuiltAt to be set")
+	// Both should auto-sync to v2
+	r1, err = binding1.Process(context.Background(), bindingTestData{})
+	if err != nil {
+		t.Fatalf("binding1 process after update failed: %v", err)
 	}
-	if history[1].BuiltAt.IsZero() {
-		t.Error("Expected history[1].BuiltAt to be set")
+	r2, err = binding2.Process(context.Background(), bindingTestData{})
+	if err != nil {
+		t.Fatalf("binding2 process after update failed: %v", err)
 	}
-	if history[1].BuiltAt.Before(history[0].BuiltAt) {
-		t.Error("Expected history entries to be in chronological order")
+	if r1.Value != "v2" || r2.Value != "v2" {
+		t.Errorf("Expected both bindings to auto-sync to 'v2', got '%s' and '%s'", r1.Value, r2.Value)
 	}
 }

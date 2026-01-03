@@ -57,6 +57,7 @@ var (
 var (
 	KeyName       = capitan.NewStringKey("name")
 	KeyType       = capitan.NewStringKey("type")
+	KeySchema     = capitan.NewStringKey("schema")
 	KeyVersion    = capitan.NewStringKey("version")
 	KeyOldVersion = capitan.NewStringKey("old_version")
 	KeyNewVersion = capitan.NewStringKey("new_version")

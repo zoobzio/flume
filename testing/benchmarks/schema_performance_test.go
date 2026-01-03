@@ -435,12 +435,15 @@ func BenchmarkSchemaValidation(b *testing.B) {
 	})
 
 	b.Run("Bind", func(b *testing.B) {
+		// Pre-register schema for binding
+		_ = factory.SetSchema("bench-schema", schema)
+
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
 			id := factory.Identity(fmt.Sprintf("pipeline-%d", i), fmt.Sprintf("Benchmark pipeline %d", i))
-			_, _ = factory.Bind(id, schema)
+			_, _ = factory.Bind(id, "bench-schema")
 		}
 	})
 }
@@ -457,7 +460,7 @@ func BenchmarkBindingRetrieval(b *testing.B) {
 		}))
 	}
 
-	// Register 100 bindings
+	// Register schemas and 100 bindings
 	bindings := make([]*flume.Binding[flumetesting.TestData], 100)
 	for i := 0; i < 100; i++ {
 		schema := flume.Schema{
@@ -466,8 +469,10 @@ func BenchmarkBindingRetrieval(b *testing.B) {
 				Ref: fmt.Sprintf("processor-%d", i%10),
 			},
 		}
+		schemaID := fmt.Sprintf("bench-schema-%d", i)
+		_ = factory.SetSchema(schemaID, schema)
 		id := factory.Identity(fmt.Sprintf("schema-%d", i), fmt.Sprintf("Benchmark schema %d", i))
-		bindings[i], _ = factory.Bind(id, schema)
+		bindings[i], _ = factory.Bind(id, schemaID)
 	}
 
 	id50 := factory.Identity("schema-50", "Benchmark schema 50")
@@ -567,15 +572,23 @@ func BenchmarkConcurrentBindingAccess(b *testing.B) {
 		}))
 	}
 
-	// Pre-register some bindings
+	// Pre-register schemas and bindings
 	bindings := make([]*flume.Binding[flumetesting.TestData], 50)
 	for i := 0; i < 50; i++ {
 		schema := flume.Schema{
 			Node: flume.Node{Ref: fmt.Sprintf("processor-%d", i%10)},
 		}
+		schemaID := fmt.Sprintf("parallel-base-schema-%d", i)
+		_ = factory.SetSchema(schemaID, schema)
 		id := factory.Identity(fmt.Sprintf("schema-%d", i), fmt.Sprintf("Benchmark schema %d", i))
-		bindings[i], _ = factory.Bind(id, schema)
+		bindings[i], _ = factory.Bind(id, schemaID)
 	}
+
+	// Pre-register a schema for parallel bindings
+	parallelSchema := flume.Schema{
+		Node: flume.Node{Ref: "processor-0"},
+	}
+	_ = factory.SetSchema("parallel-shared-schema", parallelSchema)
 
 	id25 := factory.Identity("schema-25", "Benchmark schema 25")
 	ctx := context.Background()
@@ -591,11 +604,8 @@ func BenchmarkConcurrentBindingAccess(b *testing.B) {
 			switch {
 			case i%10 == 0:
 				// Write: bind new schema
-				schema := flume.Schema{
-					Node: flume.Node{Ref: fmt.Sprintf("processor-%d", i%10)},
-				}
 				id := factory.Identity(fmt.Sprintf("parallel-schema-%d", i), fmt.Sprintf("Parallel schema %d", i))
-				_, _ = factory.Bind(id, schema)
+				_, _ = factory.Bind(id, "parallel-shared-schema")
 			case i%5 == 0:
 				// Read: get binding
 				_ = factory.Get(id25)

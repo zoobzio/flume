@@ -139,8 +139,10 @@ type Factory[T pipz.Cloner[T]] struct {
 	conditions    map[string]conditionMeta[T]
 	reducers      map[string]reducerMeta[T]
 	errorHandlers map[string]errorHandlerMeta[T]
-	bindings      map[string]*Binding[T]   // Keyed by identity.ID().String()
-	identities    map[string]pipz.Identity // Cached identities by name
+	schemas       map[string]Schema         // Schema registry (source of truth)
+	subscribers   map[string][]*Binding[T]  // Schema ID → subscribed bindings
+	bindings      map[string]*Binding[T]    // Keyed by identity.ID().String()
+	identities    map[string]pipz.Identity  // Cached identities by name
 	channels      map[string]chan<- T
 	mu            sync.RWMutex
 }
@@ -154,6 +156,8 @@ func New[T pipz.Cloner[T]]() *Factory[T] {
 		conditions:    make(map[string]conditionMeta[T]),
 		reducers:      make(map[string]reducerMeta[T]),
 		errorHandlers: make(map[string]errorHandlerMeta[T]),
+		schemas:       make(map[string]Schema),
+		subscribers:   make(map[string][]*Binding[T]),
 		bindings:      make(map[string]*Binding[T]),
 		identities:    make(map[string]pipz.Identity),
 		channels:      make(map[string]chan<- T),
@@ -651,10 +655,85 @@ func (f *Factory[T]) RemoveErrorHandler(names ...string) int {
 	return removed
 }
 
-// Bind creates or retrieves a Binding for the given identity.
+// SetSchema registers or updates a schema in the factory registry.
+// If the schema already exists and has subscribers with auto-sync enabled,
+// they will be automatically rebuilt with the new schema.
+func (f *Factory[T]) SetSchema(id string, schema Schema) error {
+	// Validate first (outside lock)
+	if err := f.ValidateSchema(schema); err != nil {
+		return err
+	}
+
+	f.mu.Lock()
+	f.schemas[id] = schema
+	subs := f.subscribers[id]
+	f.mu.Unlock()
+
+	// Rebuild auto-sync bindings
+	for _, binding := range subs {
+		if binding.autoSync {
+			// Errors are logged via capitan, but we don't fail the whole update
+			//nolint:errcheck // intentional - errors logged via observability, don't fail batch
+			binding.rebuild(schema)
+		}
+	}
+
+	capitan.Emit(context.Background(), SchemaRegistered,
+		KeySchema.Field(id),
+		KeyVersion.Field(schema.Version))
+
+	return nil
+}
+
+// GetSchema retrieves a schema from the registry.
+func (f *Factory[T]) GetSchema(id string) (Schema, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	schema, exists := f.schemas[id]
+	return schema, exists
+}
+
+// HasSchema checks if a schema is registered.
+func (f *Factory[T]) HasSchema(id string) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	_, exists := f.schemas[id]
+	return exists
+}
+
+// RemoveSchema removes a schema from the registry.
+// Existing bindings will continue to work but won't receive updates.
+func (f *Factory[T]) RemoveSchema(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, exists := f.schemas[id]; exists {
+		delete(f.schemas, id)
+		capitan.Emit(context.Background(), SchemaRemoved,
+			KeySchema.Field(id))
+		return true
+	}
+	return false
+}
+
+// ListSchemas returns all registered schema IDs.
+func (f *Factory[T]) ListSchemas() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	ids := make([]string, 0, len(f.schemas))
+	for id := range f.schemas {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// Bind creates a binding for the given identity, bound to a schema in the registry.
 // If a Binding with this identity already exists, it is returned (idempotent).
-// The schema is used to build the initial pipeline version.
-func (f *Factory[T]) Bind(identity pipz.Identity, schema Schema) (*Binding[T], error) {
+// Use WithAutoSync() to enable automatic rebuilding when the schema changes.
+func (f *Factory[T]) Bind(identity pipz.Identity, schemaID string, opts ...BindingOption[T]) (*Binding[T], error) {
 	key := identity.ID().String()
 
 	f.mu.Lock()
@@ -663,6 +742,12 @@ func (f *Factory[T]) Bind(identity pipz.Identity, schema Schema) (*Binding[T], e
 	// Check for existing binding
 	if binding, exists := f.bindings[key]; exists {
 		return binding, nil
+	}
+
+	// Get schema from registry
+	schema, exists := f.schemas[schemaID]
+	if !exists {
+		return nil, fmt.Errorf("schema '%s' not found in registry", schemaID)
 	}
 
 	// Build the pipeline
@@ -674,31 +759,32 @@ func (f *Factory[T]) Bind(identity pipz.Identity, schema Schema) (*Binding[T], e
 	// Wrap in Pipeline for tracing
 	pipeline := pipz.NewPipeline(identity, chainable)
 
-	// Create binding with default options
+	// Create binding
 	binding := &Binding[T]{
-		identity:   identity,
-		factory:    f,
-		historyCap: DefaultHistoryCap,
+		identity: identity,
+		factory:  f,
+		schemaID: schemaID,
 	}
 
-	// Set initial version
-	version := schema.Version
-	if version == "" {
-		version = "1"
+	// Apply options
+	for _, opt := range opts {
+		opt(binding)
 	}
 
-	binding.current = &pipelineVersion[T]{
-		schema:   schema,
-		pipeline: pipeline,
-		version:  version,
-		builtAt:  time.Now(),
-	}
+	// Store pipeline
+	binding.current.Store(pipeline)
 
+	// Register binding
 	f.bindings[key] = binding
+
+	// Subscribe if auto-sync
+	if binding.autoSync {
+		f.subscribers[schemaID] = append(f.subscribers[schemaID], binding)
+	}
 
 	capitan.Emit(context.Background(), SchemaRegistered,
 		KeyName.Field(identity.Name()),
-		KeyVersion.Field(version))
+		KeySchema.Field(schemaID))
 
 	return binding, nil
 }
