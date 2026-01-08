@@ -104,7 +104,7 @@ jobs:
     - name: Run linters
       uses: golangci/golangci-lint-action@v7
       with:
-        version: v2.1.6
+        version: v2.7.2
         args: --config=.golangci.yml --timeout=5m
 
     - name: Generate coverage report
