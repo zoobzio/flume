@@ -38,11 +38,11 @@ jobs:
         run: |
           go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-
       - name: Run linting
-        run: golangci-lint run --config=.golangci.yml --timeout=5m
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.1.6
+          args: --config=.golangci.yml --timeout=5m
 
   # Create release when tag is pushed
   release:

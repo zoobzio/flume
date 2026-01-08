@@ -11,7 +11,7 @@
 
 A dynamic pipeline factory for [pipz](https://github.com/zoobzio/pipz) that enables schema-driven pipeline construction with hot-reloading capabilities.
 
-## Three Operations
+## Logic in Code, Structure in Schema
 
 ```go
 // 1. Register components
@@ -50,7 +50,7 @@ result, err := pipeline.Process(ctx, order)
 
 ## Installation
 
-Requires Go 1.23+
+Requires Go 1.24+
 
 ```bash
 go get github.com/zoobzio/flume
@@ -109,6 +109,45 @@ children:
 }
 ```
 
+## Capabilities
+
+| Feature                    | Description                                                 | Docs                                                     |
+| -------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| Schema-Driven Construction | Define pipelines in YAML/JSON, build at runtime             | [Schema Format](docs/5.reference/2.schema-format.md)     |
+| Hot Reloading              | Update pipeline behavior without restarts                   | [Hot Reloading](docs/3.guides/2.hot-reloading.md)        |
+| Lock-Free Bindings         | Concurrent-safe pipeline access with auto-sync              | [API Reference](docs/5.reference/1.api.md)               |
+| Comprehensive Validation   | Schema validation with detailed error messages              | [Schema Design](docs/3.guides/1.schema-design.md)        |
+| 14 Connector Types         | Sequence, filter, retry, timeout, circuit breaker, and more | [Connector Types](docs/5.reference/3.connector-types.md) |
+| Event Emission             | Built-in observability signals                              | [Observability](docs/3.guides/5.observability.md)        |
+
+## Why Flume?
+
+- **Schema-driven**: Define pipelines in YAML/JSON, not code
+- **Hot-reloadable**: Update pipeline behavior without restarts
+- **Type-safe**: Full generics support with compile-time safety
+- **Composable**: Build complex flows from simple, tested components
+- **Observable**: Built-in [capitan](https://github.com/zoobzio/capitan) event emission
+- **Validated**: Comprehensive schema validation with detailed error messages
+
+## Configuration as Code
+
+Flume enables a pattern: **define once, reconfigure anywhere**.
+
+Register your processing components at startup. Define pipeline structure in configuration files. Update behavior at runtime without redeployment.
+
+```go
+// Components registered once
+factory.Add(validate, enrich, notify, discount)
+
+// Structure defined in config
+factory.SetSchema("checkout", loadYAML("pipelines/checkout.yaml"))
+
+// Behavior changes without restart
+factory.SetSchema("checkout", loadYAML("pipelines/checkout-v2.yaml"))
+```
+
+The code defines _what_ processors do. Configuration defines _how_ they combine.
+
 ## Hot Reloading
 
 Update pipelines at runtime without restarts:
@@ -127,37 +166,35 @@ result, _ := binding.Process(ctx, order)
 factory.SetSchema("order-pipeline", newSchema)
 ```
 
-## Why Flume?
-
-- **Schema-driven**: Define pipelines in YAML/JSON, not code
-- **Hot-reloadable**: Update pipeline behavior without restarts
-- **Type-safe**: Full generics support with compile-time safety
-- **Composable**: Build complex flows from simple, tested components
-- **Observable**: Built-in [capitan](https://github.com/zoobzio/capitan) event emission
-- **Validated**: Comprehensive schema validation with detailed error messages
-
 ## Documentation
 
 Full documentation is available in the [docs/](docs/) directory:
 
 ### Learn
+
 - [Quickstart](docs/2.learn/1.quickstart.md) — Your first pipeline in 5 minutes
 - [Core Concepts](docs/2.learn/2.core-concepts.md) — Factories, schemas, and components
 - [Architecture](docs/2.learn/3.architecture.md) — How Flume works under the hood
 - [Building Pipelines](docs/2.learn/4.building-pipelines.md) — From simple to complex
 
 ### Guides
+
 - [Schema Design](docs/3.guides/1.schema-design.md) — Best practices for schema structure
 - [Hot Reloading](docs/3.guides/2.hot-reloading.md) — Runtime pipeline updates
 - [Error Handling](docs/3.guides/3.error-handling.md) — Retry, fallback, circuit breakers
 - [Testing](docs/3.guides/4.testing.md) — Testing strategies and CI/CD linting
 - [Observability](docs/3.guides/5.observability.md) — Monitoring with capitan events
 
+### Cookbook
+
+- [Common Patterns](docs/4.cookbook/1.common-patterns.md) — Recipes and patterns
+
 ### Reference
-- [API Reference](docs/4.reference/1.api.md) — Complete API documentation
-- [Schema Format](docs/4.reference/2.schema-format.md) — YAML/JSON specification
-- [Connector Types](docs/4.reference/3.connector-types.md) — All 14 connectors
-- [Events](docs/4.reference/4.events.md) — Observability signals
+
+- [API Reference](docs/5.reference/1.api.md) — Complete API documentation
+- [Schema Format](docs/5.reference/2.schema-format.md) — YAML/JSON specification
+- [Connector Types](docs/5.reference/3.connector-types.md) — All 14 connectors
+- [Events](docs/5.reference/4.events.md) — Observability signals
 
 ## Contributing
 

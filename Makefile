@@ -1,46 +1,37 @@
-.PHONY: test bench lint coverage clean all help lint-fix check ci install-tools test-integration test-benchmarks
+.PHONY: test test-unit test-integration test-bench bench lint coverage clean all help lint-fix check ci install-tools install-hooks
 
 # Default target
-all: test lint
+.DEFAULT_GOAL := help
 
-# Display help
-help:
+# Display help - self-documenting via grep
+help: ## Display available commands
 	@echo "flume Development Commands"
 	@echo "=========================="
 	@echo ""
-	@echo "Testing & Quality:"
-	@echo "  make test            - Run unit tests with race detector"
-	@echo "  make test-integration- Run integration tests"
-	@echo "  make test-benchmarks - Run benchmark tests"
-	@echo "  make bench           - Run benchmarks"
-	@echo "  make lint            - Run linters"
-	@echo "  make lint-fix        - Run linters with auto-fix"
-	@echo "  make coverage        - Generate coverage report (HTML)"
-	@echo "  make check           - Run tests and lint (quick check)"
-	@echo "  make ci              - Full CI simulation (all tests + quality checks)"
-	@echo ""
-	@echo "Other:"
-	@echo "  make install-tools   - Install required development tools"
-	@echo "  make clean           - Clean generated files"
-	@echo "  make all             - Run tests and lint (default)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-# Run tests with race detector
-test:
-	@echo "Running core tests..."
+# Run all tests with race detector
+test: ## Run all tests with race detector
+	@echo "Running all tests..."
 	@go test -v -race ./...
 
+# Run unit tests only (short mode)
+test-unit: ## Run unit tests only (short mode)
+	@echo "Running unit tests..."
+	@go test -v -race -short ./...
+
 # Run integration tests
-test-integration:
+test-integration: ## Run integration tests
 	@echo "Running integration tests..."
 	@go test -v -race -timeout=10m ./testing/integration/...
 
 # Run benchmark tests (as tests, not benchmarks)
-test-benchmarks:
+test-bench: ## Run benchmark tests
 	@echo "Running benchmark tests..."
 	@go test -v -race -timeout=10m ./testing/benchmarks/...
 
 # Run benchmarks
-bench:
+bench: ## Run benchmarks
 	@echo "Running benchmarks..."
 	@go test -bench=. -benchmem -benchtime=100ms -timeout=15m .
 	@echo ""
@@ -48,17 +39,17 @@ bench:
 	@go test -bench=. -benchmem -benchtime=100ms -timeout=15m ./testing/benchmarks/...
 
 # Run linters
-lint:
+lint: ## Run linters
 	@echo "Running linters..."
 	@golangci-lint run --config=.golangci.yml --timeout=5m
 
 # Run linters with auto-fix
-lint-fix:
+lint-fix: ## Run linters with auto-fix
 	@echo "Running linters with auto-fix..."
 	@golangci-lint run --config=.golangci.yml --fix
 
 # Generate coverage report
-coverage:
+coverage: ## Generate coverage report (HTML)
 	@echo "Generating coverage report..."
 	@go test -coverprofile=coverage.out ./...
 	@go tool cover -html=coverage.out -o coverage.html
@@ -66,7 +57,7 @@ coverage:
 	@echo "Coverage report generated: coverage.html"
 
 # Clean generated files
-clean:
+clean: ## Remove generated files
 	@echo "Cleaning..."
 	@rm -f coverage.out coverage.html
 	@find . -name "*.test" -delete
@@ -74,14 +65,25 @@ clean:
 	@find . -name "*.out" -delete
 
 # Install development tools
-install-tools:
+install-tools: ## Install required development tools
 	@echo "Installing development tools..."
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.2
+
+# Install git hooks
+install-hooks: ## Install git hooks
+	@echo "Installing git hooks..."
+	@echo '#!/bin/sh' > .git/hooks/pre-commit
+	@echo 'make check' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed"
 
 # Quick check - run tests and lint
-check: test lint
+check: test lint ## Quick validation (test + lint)
 	@echo "All checks passed!"
 
 # CI simulation - what CI runs locally
-ci: clean lint test coverage bench
+ci: clean lint test coverage bench ## Full CI simulation
 	@echo "Full CI simulation complete!"
+
+# Default target (kept for backwards compatibility)
+all: test lint
