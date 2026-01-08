@@ -2674,3 +2674,470 @@ func TestBuildErrorPaths(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildStreamWithChild tests stream with child continuation after sending to channel.
+func TestBuildStreamWithChild(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// Define identities
+	transformID := factory.Identity("transform-after-stream", "Transforms data after stream send")
+
+	factory.Add(
+		pipz.Transform(transformID, func(_ context.Context, d TestData) TestData {
+			d.Value = "transformed-" + d.Value
+			return d
+		}),
+	)
+
+	channel := make(chan TestData, 10)
+	factory.AddChannel("stream-channel", channel)
+
+	t.Run("stream with single child continues processing", func(t *testing.T) {
+		schema := flume.Schema{
+			Node: flume.Node{
+				Stream:        "stream-channel",
+				StreamTimeout: "1s",
+				Child:         &flume.Node{Ref: "transform-after-stream"},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "original"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Result should be transformed
+		if result.Value != "transformed-original" {
+			t.Errorf("expected 'transformed-original', got '%s'", result.Value)
+		}
+
+		// Channel should have received original data (before transform)
+		select {
+		case received := <-channel:
+			if received.Value != "original" {
+				t.Errorf("channel expected 'original', got '%s'", received.Value)
+			}
+		default:
+			t.Error("channel didn't receive expected data")
+		}
+	})
+
+	t.Run("stream with multiple children continues processing", func(t *testing.T) {
+		step1ID := factory.Identity("step-1", "First step after stream")
+		step2ID := factory.Identity("step-2", "Second step after stream")
+
+		factory.Add(
+			pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
+				d.Value += "_step1"
+				return d
+			}),
+			pipz.Transform(step2ID, func(_ context.Context, d TestData) TestData {
+				d.Value += "_step2"
+				return d
+			}),
+		)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Stream:        "stream-channel",
+				StreamTimeout: "1s",
+				Children: []flume.Node{
+					{Ref: "step-1"},
+					{Ref: "step-2"},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "base"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Result should have both steps applied
+		if result.Value != "base_step1_step2" {
+			t.Errorf("expected 'base_step1_step2', got '%s'", result.Value)
+		}
+
+		// Channel should have received original data
+		select {
+		case received := <-channel:
+			if received.Value != "base" {
+				t.Errorf("channel expected 'base', got '%s'", received.Value)
+			}
+		default:
+			t.Error("channel didn't receive expected data")
+		}
+	})
+
+	t.Run("stream with custom name", func(t *testing.T) {
+		schema := flume.Schema{
+			Node: flume.Node{
+				Name:          "custom-stream-name",
+				Stream:        "stream-channel",
+				StreamTimeout: "1s",
+				Child:         &flume.Node{Ref: "transform-after-stream"},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "test"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.Value != "transformed-test" {
+			t.Errorf("expected 'transformed-test', got '%s'", result.Value)
+		}
+
+		// Drain channel
+		<-channel
+	})
+}
+
+// TestBuildHandleWithActualErrors tests handle connector with actual error scenarios.
+// Note: The handle connector processes errors via the handler but still returns the error
+// (it's for observability/logging, not recovery). Use fallback for error recovery.
+func TestBuildHandleWithActualErrors(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// Define identities
+	failingID := factory.Identity("failing-processor", "Always fails with error")
+	observerHandlerID := factory.Identity("observer-handler", "Observes errors")
+	observerProcessorID := factory.Identity("observer-processor", "Internal observer processor")
+	conditionalFailID := factory.Identity("conditional-fail", "Fails based on input")
+
+	var handlerCalled bool
+	var capturedError string
+
+	factory.Add(
+		pipz.Apply(failingID, func(_ context.Context, d TestData) (TestData, error) {
+			return d, errors.New("intentional failure from child")
+		}),
+		pipz.Apply(conditionalFailID, func(_ context.Context, d TestData) (TestData, error) {
+			if d.Value == "fail" {
+				return d, errors.New("conditional failure")
+			}
+			return d, nil
+		}),
+	)
+
+	// Error handler that observes errors (handle doesn't suppress errors, just processes them)
+	factory.AddErrorHandler(flume.ErrorHandler[TestData]{
+		Identity: observerHandlerID,
+		Handler: pipz.Transform(observerProcessorID, func(_ context.Context, e *pipz.Error[TestData]) *pipz.Error[TestData] {
+			handlerCalled = true
+			capturedError = e.Err.Error()
+			return e
+		}),
+	})
+
+	t.Run("handle invokes error handler on child error", func(t *testing.T) {
+		handlerCalled = false
+		capturedError = ""
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type:         "handle",
+				ErrorHandler: "observer-handler",
+				Child:        &flume.Node{Ref: "failing-processor"},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "original"}
+
+		_, err = pipeline.Process(ctx, input)
+		// Handle still returns the error (it's for observability, not recovery)
+		if err == nil {
+			t.Fatal("expected error to be returned")
+		}
+
+		if !handlerCalled {
+			t.Error("expected error handler to be called")
+		}
+
+		if capturedError != "intentional failure from child" {
+			t.Errorf("expected captured error 'intentional failure from child', got '%s'", capturedError)
+		}
+	})
+
+	t.Run("handle with nested sequence invokes handler on failure", func(t *testing.T) {
+		handlerCalled = false
+		capturedError = ""
+
+		step1ID := factory.Identity("step-before-fail", "Step before failure")
+		factory.Add(
+			pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
+				d.Value = "step1-" + d.Value
+				return d
+			}),
+		)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type:         "handle",
+				ErrorHandler: "observer-handler",
+				Child: &flume.Node{
+					Type: "sequence",
+					Children: []flume.Node{
+						{Ref: "step-before-fail"},
+						{Ref: "failing-processor"},
+					},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "original"}
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected error to be returned")
+		}
+
+		if !handlerCalled {
+			t.Error("expected error handler to be called for nested failure")
+		}
+	})
+
+	t.Run("handle passes through when no error", func(t *testing.T) {
+		handlerCalled = false
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type:         "handle",
+				ErrorHandler: "observer-handler",
+				Child:        &flume.Node{Ref: "conditional-fail"},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "success"} // Won't trigger failure
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Value should pass through unchanged since no error occurred
+		if result.Value != "success" {
+			t.Errorf("expected 'success', got '%s'", result.Value)
+		}
+
+		if handlerCalled {
+			t.Error("expected error handler NOT to be called when no error")
+		}
+	})
+
+	t.Run("handle with error invocation", func(t *testing.T) {
+		handlerCalled = false
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type:         "handle",
+				ErrorHandler: "observer-handler",
+				Child:        &flume.Node{Ref: "conditional-fail"},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "fail"} // Will trigger failure
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected error to be returned")
+		}
+
+		if !handlerCalled {
+			t.Error("expected error handler to be called when error occurs")
+		}
+
+		if capturedError != "conditional failure" {
+			t.Errorf("expected 'conditional failure', got '%s'", capturedError)
+		}
+	})
+}
+
+// TestBuildFallbackComplex tests fallback connector with complex scenarios.
+func TestBuildFallbackComplex(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// Define identities
+	failingPrimaryID := factory.Identity("failing-primary", "Primary that always fails")
+	failingFallbackID := factory.Identity("failing-fallback", "Fallback that also fails")
+	successFallbackID := factory.Identity("success-fallback", "Fallback that succeeds")
+	nestedFailID := factory.Identity("nested-fail", "Nested processor that fails")
+
+	factory.Add(
+		pipz.Apply(failingPrimaryID, func(_ context.Context, d TestData) (TestData, error) {
+			return d, errors.New("primary failure")
+		}),
+		pipz.Apply(failingFallbackID, func(_ context.Context, d TestData) (TestData, error) {
+			return d, errors.New("fallback also failed")
+		}),
+		pipz.Transform(successFallbackID, func(_ context.Context, d TestData) TestData {
+			d.Value = "fallback-success"
+			return d
+		}),
+		pipz.Apply(nestedFailID, func(_ context.Context, d TestData) (TestData, error) {
+			return d, errors.New("nested failure")
+		}),
+	)
+
+	t.Run("fallback with nested sequence primary that fails", func(t *testing.T) {
+		step1ID := factory.Identity("seq-step1", "First step in sequence")
+		factory.Add(
+			pipz.Transform(step1ID, func(_ context.Context, d TestData) TestData {
+				d.Value = "step1-" + d.Value
+				return d
+			}),
+		)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type: "fallback",
+				Children: []flume.Node{
+					{
+						Type: "sequence",
+						Children: []flume.Node{
+							{Ref: "seq-step1"},
+							{Ref: "nested-fail"},
+						},
+					},
+					{Ref: "success-fallback"},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "original"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.Value != "fallback-success" {
+			t.Errorf("expected 'fallback-success', got '%s'", result.Value)
+		}
+	})
+
+	t.Run("fallback when both primary and fallback fail", func(t *testing.T) {
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type: "fallback",
+				Children: []flume.Node{
+					{Ref: "failing-primary"},
+					{Ref: "failing-fallback"},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "original"}
+
+		_, err = pipeline.Process(ctx, input)
+		if err == nil {
+			t.Fatal("expected error when both primary and fallback fail")
+		}
+		if !contains(err.Error(), "fallback also failed") {
+			t.Errorf("expected fallback error, got: %v", err)
+		}
+	})
+
+	t.Run("nested fallback recovery", func(t *testing.T) {
+		deepFallbackID := factory.Identity("deep-fallback", "Deep fallback processor")
+		factory.Add(
+			pipz.Transform(deepFallbackID, func(_ context.Context, d TestData) TestData {
+				d.Value = "deep-recovery"
+				return d
+			}),
+		)
+
+		schema := flume.Schema{
+			Node: flume.Node{
+				Type: "fallback",
+				Children: []flume.Node{
+					{Ref: "failing-primary"},
+					{
+						Type: "fallback",
+						Children: []flume.Node{
+							{Ref: "failing-fallback"},
+							{Ref: "deep-fallback"},
+						},
+					},
+				},
+			},
+		}
+
+		pipeline, err := factory.Build(schema)
+		if err != nil {
+			t.Fatalf("unexpected build error: %v", err)
+		}
+
+		ctx := context.Background()
+		input := TestData{Value: "original"}
+
+		result, err := pipeline.Process(ctx, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.Value != "deep-recovery" {
+			t.Errorf("expected 'deep-recovery', got '%s'", result.Value)
+		}
+	})
+}

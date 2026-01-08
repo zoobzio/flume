@@ -980,3 +980,25 @@ func TestChannelFactory(t *testing.T) {
 		}
 	})
 }
+
+func TestIdentityPanicsOnDifferentDescription(t *testing.T) {
+	factory := flume.New[TestData]()
+
+	// First registration should succeed
+	_ = factory.Identity("test-identity", "Original description")
+
+	// Same name and description should return the same identity
+	id2 := factory.Identity("test-identity", "Original description")
+	if id2.Name() != "test-identity" {
+		t.Errorf("expected name 'test-identity', got %s", id2.Name())
+	}
+
+	// Different description should panic
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic when registering same identity with different description")
+		}
+	}()
+
+	_ = factory.Identity("test-identity", "Different description")
+}

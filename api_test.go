@@ -158,6 +158,54 @@ func TestSpec_Conditions(t *testing.T) {
 	}
 }
 
+func TestSpec_ConditionsSorting(t *testing.T) {
+	factory := flume.New[testData]()
+
+	// Define identities in non-alphabetical order
+	zConditionID := factory.Identity("z-condition", "Z condition for sorting test")
+	aConditionID := factory.Identity("a-condition", "A condition for sorting test")
+	mConditionID := factory.Identity("m-condition", "M condition for sorting test")
+
+	// Add conditions in random order
+	factory.AddCondition(
+		flume.Condition[testData]{
+			Identity:  zConditionID,
+			Values:    []string{"z1", "z2"},
+			Condition: func(_ context.Context, _ testData) string { return "z1" },
+		},
+		flume.Condition[testData]{
+			Identity:  aConditionID,
+			Values:    []string{"a1", "a2"},
+			Condition: func(_ context.Context, _ testData) string { return "a1" },
+		},
+		flume.Condition[testData]{
+			Identity:  mConditionID,
+			Values:    []string{"m1", "m2"},
+			Condition: func(_ context.Context, _ testData) string { return "m1" },
+		},
+	)
+
+	// Call Spec multiple times to verify deterministic ordering
+	for i := 0; i < 10; i++ {
+		spec := factory.Spec()
+
+		if len(spec.Conditions) != 3 {
+			t.Fatalf("iteration %d: expected 3 conditions, got %d", i, len(spec.Conditions))
+		}
+
+		// Should be sorted alphabetically
+		if spec.Conditions[0].Name != "a-condition" {
+			t.Errorf("iteration %d: expected first condition 'a-condition', got %s", i, spec.Conditions[0].Name)
+		}
+		if spec.Conditions[1].Name != "m-condition" {
+			t.Errorf("iteration %d: expected second condition 'm-condition', got %s", i, spec.Conditions[1].Name)
+		}
+		if spec.Conditions[2].Name != "z-condition" {
+			t.Errorf("iteration %d: expected third condition 'z-condition', got %s", i, spec.Conditions[2].Name)
+		}
+	}
+}
+
 func TestSpec_Channels(t *testing.T) {
 	factory := flume.New[testData]()
 
