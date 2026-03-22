@@ -50,3 +50,6 @@ flume
 
 # GoReleaser output directory
 .dist/
+
+# Claude
+.claude/

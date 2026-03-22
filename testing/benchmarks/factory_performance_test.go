@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/zoobzio/flume"
-	flumetesting "github.com/zoobzio/flume/testing"
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/flume"
+	flumetesting "github.com/zoobz-io/flume/testing"
+	"github.com/zoobz-io/pipz"
 )
 
 // BenchmarkFactoryCreation measures factory instantiation overhead.

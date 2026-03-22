@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/zoobzio/flume"
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/flume"
+	"github.com/zoobz-io/pipz"
 )
 
 // testData implements pipz.Cloner[testData] for spec tests.

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zoobzio/capitan"
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/capitan"
+	"github.com/zoobz-io/pipz"
 )
 
 // Predicate combines an identity with a predicate function for batch registration.

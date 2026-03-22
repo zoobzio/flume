@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zoobzio/capitan"
-	"github.com/zoobzio/flume"
+	"github.com/zoobz-io/capitan"
+	"github.com/zoobz-io/flume"
 )
 
 func TestObservabilitySignals(t *testing.T) {

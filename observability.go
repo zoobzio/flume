@@ -1,7 +1,7 @@
 package flume
 
 import (
-	"github.com/zoobzio/capitan"
+	"github.com/zoobz-io/capitan"
 )
 
 // Flume-specific signals for observability.
