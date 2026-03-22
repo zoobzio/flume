@@ -36,8 +36,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zoobzio/flume"
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/flume"
+	"github.com/zoobz-io/pipz"
 )
 
 // TestData is a simple cloneable test data type for use in tests.

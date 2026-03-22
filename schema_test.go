@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/zoobzio/flume"
+	"github.com/zoobz-io/flume"
 	"gopkg.in/yaml.v3"
 )
 

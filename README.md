@@ -1,15 +1,15 @@
 # Flume
 
-[![CI Status](https://github.com/zoobzio/flume/workflows/CI/badge.svg)](https://github.com/zoobzio/flume/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/zoobzio/flume/graph/badge.svg?branch=main)](https://codecov.io/gh/zoobzio/flume)
-[![Go Report Card](https://goreportcard.com/badge/github.com/zoobzio/flume)](https://goreportcard.com/report/github.com/zoobzio/flume)
-[![CodeQL](https://github.com/zoobzio/flume/workflows/CodeQL/badge.svg)](https://github.com/zoobzio/flume/security/code-scanning)
-[![Go Reference](https://pkg.go.dev/badge/github.com/zoobzio/flume.svg)](https://pkg.go.dev/github.com/zoobzio/flume)
-[![License](https://img.shields.io/github/license/zoobzio/flume)](LICENSE)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/zoobzio/flume)](go.mod)
-[![Release](https://img.shields.io/github/v/release/zoobzio/flume)](https://github.com/zoobzio/flume/releases)
+[![CI Status](https://github.com/zoobz-io/flume/workflows/CI/badge.svg)](https://github.com/zoobz-io/flume/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zoobz-io/flume/graph/badge.svg?branch=main)](https://codecov.io/gh/zoobz-io/flume)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zoobz-io/flume)](https://goreportcard.com/report/github.com/zoobz-io/flume)
+[![CodeQL](https://github.com/zoobz-io/flume/workflows/CodeQL/badge.svg)](https://github.com/zoobz-io/flume/security/code-scanning)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zoobz-io/flume.svg)](https://pkg.go.dev/github.com/zoobz-io/flume)
+[![License](https://img.shields.io/github/license/zoobz-io/flume)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/zoobz-io/flume)](go.mod)
+[![Release](https://img.shields.io/github/v/release/zoobz-io/flume)](https://github.com/zoobz-io/flume/releases)
 
-A dynamic pipeline factory for [pipz](https://github.com/zoobzio/pipz) that enables schema-driven pipeline construction with hot-reloading capabilities.
+A dynamic pipeline factory for [pipz](https://github.com/zoobz-io/pipz) that enables schema-driven pipeline construction with hot-reloading capabilities.
 
 ## Logic in Code, Structure in Schema
 
@@ -53,7 +53,7 @@ result, err := pipeline.Process(ctx, order)
 Requires Go 1.24+
 
 ```bash
-go get github.com/zoobzio/flume
+go get github.com/zoobz-io/flume
 ```
 
 ## Quick Start
@@ -64,8 +64,8 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/zoobzio/flume"
-    "github.com/zoobzio/pipz"
+    "github.com/zoobz-io/flume"
+    "github.com/zoobz-io/pipz"
 )
 
 type Order struct {
@@ -126,7 +126,7 @@ children:
 - **Hot-reloadable**: Update pipeline behavior without restarts
 - **Type-safe**: Full generics support with compile-time safety
 - **Composable**: Build complex flows from simple, tested components
-- **Observable**: Built-in [capitan](https://github.com/zoobzio/capitan) event emission
+- **Observable**: Built-in [capitan](https://github.com/zoobz-io/capitan) event emission
 - **Validated**: Comprehensive schema validation with detailed error messages
 
 ## Configuration as Code

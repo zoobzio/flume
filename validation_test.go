@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zoobzio/flume"
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/flume"
+	"github.com/zoobz-io/pipz"
 )
 
 func TestValidation(t *testing.T) {

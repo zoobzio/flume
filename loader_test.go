@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zoobzio/flume"
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/flume"
+	"github.com/zoobz-io/pipz"
 )
 
 func TestBuildFromFile(t *testing.T) {

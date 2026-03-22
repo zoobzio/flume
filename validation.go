@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zoobzio/capitan"
+	"github.com/zoobz-io/capitan"
 )
 
 // ValidationError represents a schema validation error with detailed context.

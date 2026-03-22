@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zoobzio/pipz"
+	"github.com/zoobz-io/pipz"
 )
 
 // Connector type constants.

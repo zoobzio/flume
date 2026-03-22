@@ -1,11 +1,11 @@
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/zoobzio/capitan v1.0.0 h1:hEB8XX/FmtIDHKjjTJrUWXkDiZTYa/Jtd/qWO0yc2Dc=
-github.com/zoobzio/capitan v1.0.0/go.mod h1:UNZvqLPX2REzKLVfU4EfL9GRe6zddsj6aSWaqNUGAIw=
-github.com/zoobzio/clockz v1.0.0 h1:B0uzNpgdzqVKewyHUpx+EIZg+zS8Y0tXcVF1qY6IN8A=
-github.com/zoobzio/clockz v1.0.0/go.mod h1:YRTE9Ni6hVqmO2kfx4zeTTW25sI+XL+qBS/UneIMa7M=
-github.com/zoobzio/pipz v1.0.4 h1:8VgHdD+bX3HzYnc4F77oFNPFceaIf8D32LzrCWaGMe4=
-github.com/zoobzio/pipz v1.0.4/go.mod h1:uqp+xEFBQ63X8+O0WFBqpemwVqZml/MeKojxE2wx9xI=
+github.com/zoobz-io/capitan v1.0.2 h1:/NKAgntWeRIN4S0oaZJNk6qaYuDN/Gw68+81kLbkLrc=
+github.com/zoobz-io/capitan v1.0.2/go.mod h1:tFqS6q99gRvgYBzvFIfJMDV1ukWU61H6ZB4HyZmiWuI=
+github.com/zoobz-io/clockz v1.0.2 h1:7ejfwTlaeNaVlLWW0pl1ZHfsaq3Iwg5vCphrvJMDNXI=
+github.com/zoobz-io/clockz v1.0.2/go.mod h1:kkUNGMtZ5r349253S1uOuLR/6YkC+qt8C8UIypFhn8o=
+github.com/zoobz-io/pipz v1.0.5 h1:PEY7KhIV+PFPseRcFVbo2gHoCFjKcDPz040/46jzcmM=
+github.com/zoobz-io/pipz v1.0.5/go.mod h1:Fqif5Ciw0GViOA1FbR2BBnSeOF0fWB9MCQ//ViGuGhs=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
